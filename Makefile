@@ -14,7 +14,7 @@ ifeq (, $(shell command -v $(GOLANGCI_LINT) 2>/dev/null))
 GOLANGCI_LINT := $(HOME)/go/bin/golangci-lint
 endif
 
-.PHONY: up down migrate-up migrate-down token fmt vet lint test test-race test-integration test-cluster test-all cover ci bootstrap
+.PHONY: up down migrate-up migrate-down token fmt vet lint test test-race test-integration test-cluster test-all cover ci bootstrap loadtest
 
 up:
 	$(COMPOSE) up -d --build
@@ -65,6 +65,11 @@ test-cluster:
 	$(GO) test -race -tags=cluster ./test/cluster/...
 
 test-all: test-race test-integration test-cluster
+
+# Load test (vegeta). Overrides: WALLETS DURATION RATE WORKERS BET_AMOUNT INITIAL_BALANCE
+# Requires: go install github.com/tsenart/vegeta/v12@latest
+loadtest:
+	bash scripts/loadtest.sh
 
 cover:
 	$(GO) test -coverprofile=coverage.out ./...

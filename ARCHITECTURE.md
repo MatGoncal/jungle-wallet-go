@@ -126,9 +126,11 @@ O consumer agrupa o lote por `MessageGroupId` e processa um grupo por goroutine 
 
 Além de `docs/examples/curl.md`, a collection [`docs/examples/jungle-wallet.postman_collection.json`](docs/examples/jungle-wallet.postman_collection.json) (environment local ao lado) cobre o fluxo autenticado ponta a ponta — tokens, abertura, BET/WIN/LOSS, replay, conflito, REFUND + ROLLBACK de REFUND, pendência de referência, leituras, authz e reconciliação — com asserção por request. `newman run` no README.
 
+Carga reprodutível (p50/p95/p99 + snapshot Prometheus): [`docs/loadtest.md`](docs/loadtest.md) (`make loadtest`).
+
 ## Limitações e interpretações
 
-- Não implementados (opcionais do enunciado): OpenTelemetry tracing, ledger de partidas dobradas, suíte de carga com p50/p95/p99.
+- Não implementados (opcionais do enunciado): OpenTelemetry tracing, ledger de partidas dobradas.
 - `PENDING` intermediário assíncrono não é persistido; retomação durável cobre `PENDING_REFERENCE` e outbox/inbox.
 - Escala monetária fixa em 2 casas (adequado a BRL nos cenários; tipo carrega moeda e rejeita incompatibilidade).
 - Clients/segredos do Keycloak e LocalStack são apenas para ambiente local (`.env.example`).
