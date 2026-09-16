@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 )
 
 func TestMigrations_UpDownUp(t *testing.T) {
+	// migrate down drops wallet_app; that breaks a shared Compose API still holding pools.
+	if os.Getenv("USE_COMPOSE") == "1" || os.Getenv("SKIP_TESTCONTAINERS") == "1" {
+		t.Skip("skip migrate up/down against shared Compose Postgres")
+	}
 	if sharedPool != nil {
 		sharedPool.Close()
 		sharedPool = nil

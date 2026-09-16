@@ -104,7 +104,7 @@ Eventos tipados: `WagerTransactionProcessed`, `WagerTransactionRejected`, `Walle
 
 ## Autenticação e autorização
 
-Keycloak no Compose com realm importado. Validação JWT via JWKS (`coreos/go-oidc`). `providerId` do corpo conferido com claim do token (divergência → 403 antes de escrita). Isolamento entre provedores em leitura e replay. `POST /wallets` e reconciliação exigem `wallet:admin`. Mensageria: políticas IAM no LocalStack; domínio continua validando no consumidor.
+Keycloak no Compose com realm importado. Validação JWT via JWKS (`coreos/go-oidc`). `providerId` do corpo conferido com claim do token (divergência → 403 antes de escrita). Isolamento entre provedores em leitura e replay. `POST /wallets`, `GET /wallets/{id}`, `GET /wallets/{id}/ledger` e reconciliação exigem `wallet:admin` (`RequireInternal`). Mensageria: filas FIFO com atributo `Policy` (política de recurso da fila) no LocalStack; users/policies IAM também são criados no `init-sqs.sh`, mas o LocalStack **não aplica** IAM sem `ENFORCE_IAM` — no ambiente local essas policies de usuário são declarativas. O domínio continua validando no consumidor.
 
 ## Fx e shutdown
 
@@ -114,10 +114,26 @@ Módulos por camada (`fx.Module` / `Provide` / `Invoke`). `fx.Lifecycle`: valida
 
 Logs JSON (`slog`) com `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId` — sem credenciais nem payload financeiro completo. Prometheus em `/metrics`: status, duplicatas, retries, DLQ, conflitos, lag de outbox, latência, divergências de reconciliação. `/health/live` e `/health/ready` (Postgres + SQS).
 
+## Ordem de lock na aposta
+
+No processamento de aposta, a chave de idempotência é consultada com `SELECT` antes de qualquer escrita. Operação nova: `SELECT … FOR UPDATE` na carteira e só então `INSERT` da chave. Isso evita deadlock clássico: dois `INSERT` em `wager_transactions` pegavam `FOR KEY SHARE` na carteira e depois pediam `FOR UPDATE` um ao outro. Deadlock (`40P01`) / serialization failure (`40001`) no UoW ainda entram em retry limitado e, esgotado, viram `ErrTransient` → 503.
+
+## Consumidor SQS e reconciliação
+
+O consumer agrupa o lote por `MessageGroupId` e processa um grupo por goroutine (FIFO por carteira). Reconciliação soma o ledger no banco (`SUM`), sem truncar a leitura em memória.
+
+## Smoke HTTP (Postman)
+
+Além de `docs/examples/curl.md`, a collection [`docs/examples/jungle-wallet.postman_collection.json`](docs/examples/jungle-wallet.postman_collection.json) (environment local ao lado) cobre o fluxo autenticado ponta a ponta — tokens, abertura, BET/WIN/LOSS, replay, conflito, REFUND + ROLLBACK de REFUND, pendência de referência, leituras, authz e reconciliação — com asserção por request. `newman run` no README.
+
 ## Limitações e interpretações
 
 - Não implementados (opcionais do enunciado): OpenTelemetry tracing, ledger de partidas dobradas, suíte de carga com p50/p95/p99.
 - `PENDING` intermediário assíncrono não é persistido; retomação durável cobre `PENDING_REFERENCE` e outbox/inbox.
 - Escala monetária fixa em 2 casas (adequado a BRL nos cenários; tipo carrega moeda e rejeita incompatibilidade).
 - Clients/segredos do Keycloak e LocalStack são apenas para ambiente local (`.env.example`).
+- LocalStack sem `ENFORCE_IAM`: policies IAM de usuário no `init-sqs.sh` são declarativas; a política efetiva local é o atributo `Policy` das filas.
 - Integração pode usar testcontainers ou fallback `USE_COMPOSE=1` apontando ao stack já provisionado — infraestrutura real, sem mock total de PG/SQS/IdP.
+- `GET /wallets/{id}` e `GET /wallets/{id}/ledger` são só `wallet:admin` (mesmo gate de `POST /wallets` e reconciliação), não `wagering:read`.
+- Com `USE_COMPOSE=1`, `TestMigrations_UpDownUp` é skipped (migrate down dropa `wallet_app` e quebraria a API compartilhada); o teste roda sob testcontainers.
+- Compose: API depende de Keycloak `service_healthy` (realm importado). `scripts/bootstrap.sh` ainda força `up` da API após o realm responder, para clones limpos.

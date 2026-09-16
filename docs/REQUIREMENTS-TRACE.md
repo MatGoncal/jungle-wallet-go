@@ -22,7 +22,7 @@ Fonte: [`CHALLENGE.md`](CHALLENGE.md). Cada exigência numerada aponta para arte
 | §4.2 | Modules versionados | `go.mod` / `go.sum` | CI |
 | §4.3 | Uber Fx | `internal/appfx`, `cmd/api` | `TestFx_LifecycleStartsAndStops` |
 | §4.4 | HTTP `net/http` | `internal/transport/http` | handlers + authz |
-| §4.5 | PostgreSQL + migrations up/down | `migrations/`, `make migrate-*` | `TestMigrations_UpDownUp` |
+| §4.5 | PostgreSQL + migrations up/down | `migrations/`, `make migrate-*` | `TestMigrations_UpDownUp` (testcontainers; skip com `USE_COMPOSE=1`) |
 | §4.6 | SQS via LocalStack | `deploy/localstack/init-sqs.sh` | messaging + cluster |
 | §4.7 | Docker Compose | `deploy/docker-compose.yml` | `make bootstrap` |
 | §4.8 | `go test` + `-race` | Makefile | `make test-race`, CI |
@@ -43,7 +43,7 @@ Fonte: [`CHALLENGE.md`](CHALLENGE.md). Cada exigência numerada aponta para arte
 | §6.3 | WagerTransaction estados e OPENING interno | `internal/domain/wagering` | `transaction_test.go` |
 | §6.4 | LedgerEntry valida balanceAfter; unique wallet+tx | domain + migration | domain + `TestConstraints_LedgerMathAndAppendOnly` |
 | §6.5 | Inbox/outbox na mesma tx do domínio | consumer + repos | messaging + `TestRepositories_UnitOfWorkCommitAndRollback` |
-| §7.1 | BET/WIN/LOSS/REFUND/ROLLBACK regras | `ProcessWagerTransaction` | `process_wager_test.go`, usecase_test |
+| §7.1 | BET/WIN/LOSS/REFUND/ROLLBACK regras (ROLLBACK de REFUND incluso) | `ProcessWagerTransaction`, `resolve_pending` | `process_wager_test.go`, `TestProcessWager_RollbackOfRefundRestoresBalance`, collection Postman |
 | §7.2 | Resolução de referência e mismatches | `processReversal` | pending ref tests |
 | §7.3 | Uma reversão bem-sucedida por aposta (REFUND∪ROLLBACK) | índice parcial + código | `TestConstraints_OneReversalPerReference` |
 | §7.4 | `REVERSAL_INSUFFICIENT_FUNDS` ≠ `INSUFFICIENT_FUNDS` | `apperr` + process | domain/app |
@@ -52,7 +52,7 @@ Fonte: [`CHALLENGE.md`](CHALLENGE.md). Cada exigência numerada aponta para arte
 | §8.1 | Coordenação por carteira, ≥3 processos | compose api-1..3 | `TestCluster_ThreeInstancesSimultaneously` |
 | §8.2 | 100 BRL + 2×80 BET → 20 + 1 débito | ProcessWager + cluster | `TestCluster_TwoBets80On100` |
 | §9.1 | POST /wallets + OPENING/ledger/outbox ou zero | `OpenWallet`, handlers | `TestOpenWallet_*` |
-| §9.2 | GETs wallet/ledger/tx + cursor estável | handlers, `cursor` | `TestLedger_PaginationNoGapOverlap`, `cursor_test` |
+| §9.2 | GETs wallet/ledger/tx + cursor estável | handlers, `cursor`; wallet/ledger só interno | `TestLedger_PaginationNoGapOverlap`, `TestHTTP_WalletReadInternalOnly`, collection Postman |
 | §9.3 | POST wagering + Idempotency-Key obrigatório | handlers | authz + process tests |
 | §9.4 | Hash canônico HTTP≡SQS; replay saldo original; conflitos | `wagering.CanonicalHash`, ProcessWager | `TestProcessWager_*`, usecase_test |
 | §9.5 | Reconciliação REPEATABLE READ, difference, métrica | `queries` reconcile | `TestReconciliation_RepeatableReadConsistent` |
@@ -76,6 +76,7 @@ Fonte: [`CHALLENGE.md`](CHALLENGE.md). Cada exigência numerada aponta para arte
 | §15.3 | Comandos compose / test / race / vet | README, Makefile | `make ci` |
 | §15.4 | Build tags integration/cluster | Makefile | `test-integration`, `test-cluster` |
 | §15.5 | gofmt + deps reproduzíveis | `make ci`, `go.sum` | CI `gofmt -l` |
+| §15.x | Smoke HTTP encadeado | `docs/examples/jungle-wallet.postman_collection.json` | `newman run …` (README) |
 
 ## Eliminatórios
 
@@ -100,6 +101,10 @@ make bootstrap          # compose --build, migrate, token, POST /wallets
 make ci                 # gofmt, vet, lint, test -race
 USE_COMPOSE=1 make test-integration
 USE_COMPOSE=1 make test-cluster
+newman run docs/examples/jungle-wallet.postman_collection.json \
+  -e docs/examples/jungle-wallet.local.postman_environment.json
 ```
 
 Equivalentes §15: `docker compose -f deploy/docker-compose.yml up --build`, `go vet ./...`, `go test ./...`, `go test -race ./...`.
+
+Repetir a suíte pesada (`test-integration` + `test-cluster`) três vezes quando fechar release, para caçar flakiness.

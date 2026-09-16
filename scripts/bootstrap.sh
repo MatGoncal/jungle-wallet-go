@@ -50,6 +50,9 @@ wait_http "http://localhost:4566/_localstack/health" "localstack" 90
 log "waiting for keycloak..."
 wait_http "http://localhost:8081/realms/jungle-wallet" "keycloak" 90
 
+log "ensuring API is up after Keycloak is ready..."
+"${COMPOSE[@]}" up -d --no-deps api api-1 api-2 api-3
+
 log "running migrations..."
 if command -v migrate >/dev/null 2>&1; then
   migrate -path migrations -database "$MIGRATE_DATABASE_URL" up
