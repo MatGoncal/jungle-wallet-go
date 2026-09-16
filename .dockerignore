@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+*.md
+!migrations/**
+coverage.out
+.env
+.env.*
+test/
+docs/
+scripts/
+.golangci.yml
+.editorconfig
+**/*_test.go

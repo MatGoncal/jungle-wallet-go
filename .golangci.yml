@@ -1,0 +1,35 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - revive
+    - gosec
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+    - contextcheck
+    - forbidigo
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+        disabled: true
+  forbidigo:
+    forbid:
+      - p: ^float32$
+        msg: proibido no caminho monetário; use int64/unidades mínimas ou decimal
+      - p: ^float64$
+        msg: proibido no caminho monetário; use int64/unidades mínimas ou decimal
+
+issues:
+  exclude-rules:
+    - path-except: internal/domain/|internal/infra/postgres/
+      linters:
+        - forbidigo

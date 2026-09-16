@@ -1,0 +1,354 @@
+{
+  "id": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b",
+  "realm": "jungle-wallet",
+  "displayName": "Jungle Wallet",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "accessCodeLifespan": 60,
+  "accessCodeLifespanUserAction": 300,
+  "accessCodeLifespanLogin": 1800,
+  "actionTokenGeneratedByAdminLifespan": 43200,
+  "actionTokenGeneratedByUserLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "id": "11111111-1111-4111-8111-111111111101",
+        "name": "wagering:write",
+        "description": "Create and update wagering transactions",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b"
+      },
+      {
+        "id": "11111111-1111-4111-8111-111111111102",
+        "name": "wagering:read",
+        "description": "Read wagering transactions",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b"
+      },
+      {
+        "id": "11111111-1111-4111-8111-111111111103",
+        "name": "wallet:admin",
+        "description": "Full wallet administration",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b"
+      },
+      {
+        "id": "11111111-1111-4111-8111-111111111104",
+        "name": "default-roles-jungle-wallet",
+        "description": "${role_default-roles}",
+        "composite": true,
+        "composites": {
+          "realm": [
+            "offline_access",
+            "uma_authorization"
+          ],
+          "client": {}
+        },
+        "clientRole": false,
+        "containerId": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b"
+      },
+      {
+        "id": "11111111-1111-4111-8111-111111111105",
+        "name": "offline_access",
+        "description": "${role_offline-access}",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b"
+      },
+      {
+        "id": "11111111-1111-4111-8111-111111111106",
+        "name": "uma_authorization",
+        "description": "${role_uma_authorization}",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b"
+      }
+    ],
+    "client": {}
+  },
+  "defaultRole": {
+    "id": "11111111-1111-4111-8111-111111111104",
+    "name": "default-roles-jungle-wallet",
+    "description": "${role_default-roles}",
+    "composite": true,
+    "clientRole": false,
+    "containerId": "7f3e2a1b-4c5d-6e7f-8a9b-0c1d2e3f4a5b"
+  },
+  "clients": [
+    {
+      "id": "44444444-4444-4444-8444-444444444401",
+      "clientId": "provider-a",
+      "name": "Provider A",
+      "description": "Wagering provider A (client credentials)",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "provider-a-secret",
+      "redirectUris": [],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "roles",
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "id": "55555555-5555-4555-8555-555555555501",
+          "name": "provider-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "provider_id",
+            "claim.value": "provider-a",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444402",
+      "clientId": "provider-b",
+      "name": "Provider B",
+      "description": "Wagering provider B (client credentials)",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "provider-b-secret",
+      "redirectUris": [],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "roles",
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "id": "55555555-5555-4555-8555-555555555502",
+          "name": "provider-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "provider_id",
+            "claim.value": "provider-b",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444403",
+      "clientId": "internal-service",
+      "name": "Internal Service",
+      "description": "Internal wallet service (client credentials)",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "internal-service-secret",
+      "redirectUris": [],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "roles",
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": []
+    }
+  ],
+  "users": [
+    {
+      "id": "66666666-6666-4666-8666-666666666601",
+      "createdTimestamp": 1700000000000,
+      "username": "service-account-provider-a",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "serviceAccountClientId": "provider-a",
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "wagering:write",
+        "wagering:read"
+      ],
+      "clientRoles": {},
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666602",
+      "createdTimestamp": 1700000000000,
+      "username": "service-account-provider-b",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "serviceAccountClientId": "provider-b",
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "wagering:write",
+        "wagering:read"
+      ],
+      "clientRoles": {},
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666603",
+      "createdTimestamp": 1700000000000,
+      "username": "service-account-internal-service",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "serviceAccountClientId": "internal-service",
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "wallet:admin"
+      ],
+      "clientRoles": {},
+      "notBefore": 0,
+      "groups": []
+    }
+  ],
+  "browserSecurityHeaders": {
+    "contentSecurityPolicyReportOnly": "",
+    "xContentTypeOptions": "nosniff",
+    "referrerPolicy": "no-referrer",
+    "xRobotsTag": "none",
+    "xFrameOptions": "SAMEORIGIN",
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "xXSSProtection": "1; mode=block",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  },
+  "smtpServer": {},
+  "eventsEnabled": false,
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "enabledEventTypes": [],
+  "adminEventsEnabled": false,
+  "adminEventsDetailsEnabled": false,
+  "internationalizationEnabled": false,
+  "supportedLocales": [],
+  "attributes": {
+    "cibaBackchannelTokenDeliveryMode": "poll",
+    "cibaExpiresIn": "120",
+    "cibaAuthRequestedUserHint": "login_hint",
+    "oauth2DeviceCodeLifespan": "600",
+    "oauth2DevicePollingInterval": "5",
+    "parRequestUriLifespan": "60",
+    "frontendUrl": "",
+    "acr.loa.map": "{}"
+  },
+  "keycloakVersion": "26.1.2"
+}

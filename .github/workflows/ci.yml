@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit, fmt, vet, lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: gofmt check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+
+      - name: Unit tests (race)
+        run: go test -race ./...
+
+  integration:
+    name: Integration (postgres)
+    runs-on: ubuntu-latest
+    needs: unit
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: wallet
+          POSTGRES_PASSWORD: wallet
+          POSTGRES_DB: wallet
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wallet -d wallet"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://wallet:wallet@localhost:5432/wallet?sslmode=disable
+      MIGRATE_DATABASE_URL: postgres://wallet:wallet@localhost:5432/wallet?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Install migrate
+        run: |
+          curl -fsSL https://github.com/golang-migrate/migrate/releases/download/v4.18.1/migrate.linux-amd64.tar.gz \
+            | tar xvz migrate
+          sudo mv migrate /usr/local/bin/migrate
+
+      - name: Migrate up
+        run: migrate -path migrations -database "$MIGRATE_DATABASE_URL" up
+
+      - name: Integration tests
+        run: go test -race -tags=integration ./test/integration/...
