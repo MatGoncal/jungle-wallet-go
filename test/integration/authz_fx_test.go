@@ -132,6 +132,13 @@ func TestAuthz_NoFinancialEffect(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer not-a-jwt")
 	assertStatus("invalid token", http.StatusUnauthorized, req)
 
+	// Expired token (§13: missing, invalid, and expired)
+	shortToken := clientToken(t, "provider-short-lived", "provider-short-lived-secret")
+	time.Sleep(6 * time.Second)
+	req, _ = http.NewRequest(http.MethodGet, base+"/wagering/transactions/"+uuid.NewString(), nil)
+	req.Header.Set("Authorization", "Bearer "+shortToken)
+	assertStatus("expired token", http.StatusUnauthorized, req)
+
 	// Provider cannot open wallet
 	body := fmt.Sprintf(`{"playerId":%q,"initialBalance":{"amount":"10.00","currency":"BRL"}}`, uuid.NewString())
 	req, _ = http.NewRequest(http.MethodPost, base+"/wallets", strings.NewReader(body))
@@ -213,4 +220,59 @@ func TestAuthz_NoFinancialEffect(t *testing.T) {
 	}
 	_ = afterL
 	_ = afterO
+}
+
+func TestHTTP_WalletReadInternalOnly(t *testing.T) {
+	base, _ := startAPI(t)
+	tokenA := clientToken(t, "provider-a", "provider-a-secret")
+	tokenInternal := clientToken(t, "internal-service", "internal-service-secret")
+
+	body := fmt.Sprintf(`{"playerId":%q,"initialBalance":{"amount":"25.00","currency":"BRL"}}`, uuid.NewString())
+	req, _ := http.NewRequest(http.MethodPost, base+"/wallets", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tokenInternal)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("open wallet: %d %s", resp.StatusCode, b)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil || created.ID == "" {
+		t.Fatalf("decode wallet: %v id=%q", err, created.ID)
+	}
+
+	assertStatus := func(name string, status int, req *http.Request) {
+		t.Helper()
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		defer r.Body.Close()
+		if r.StatusCode != status {
+			b, _ := io.ReadAll(r.Body)
+			t.Fatalf("%s: got %d want %d body=%s", name, r.StatusCode, status, b)
+		}
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/wallets/"+created.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokenInternal)
+	assertStatus("internal get wallet", http.StatusOK, req)
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/wallets/"+created.ID+"/ledger", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenInternal)
+	assertStatus("internal get ledger", http.StatusOK, req)
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/wallets/"+created.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	assertStatus("provider get wallet", http.StatusForbidden, req)
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/wallets/"+created.ID+"/ledger", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenA)
+	assertStatus("provider get ledger", http.StatusForbidden, req)
 }
