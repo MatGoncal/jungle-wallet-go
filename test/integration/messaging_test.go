@@ -212,10 +212,63 @@ func TestSQS_PoisonGoesTowardDLQ(t *testing.T) {
 	client := awssqs.NewFromConfig(awsCfg, func(o *awssqs.Options) {
 		o.BaseEndpoint = aws.String(sharedSQSEndpoint)
 	})
+
+	suffix := uuid.NewString()
+	dlqName := "poison-dlq-" + suffix + ".fifo"
+	mainName := "poison-main-" + suffix + ".fifo"
+
+	_, err = client.CreateQueue(ctx, &awssqs.CreateQueueInput{
+		QueueName: aws.String(dlqName),
+		Attributes: map[string]string{
+			"FifoQueue":                 "true",
+			"ContentBasedDeduplication": "false",
+			"MessageRetentionPeriod":    "1209600",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create dlq: %v", err)
+	}
+	dlqURLOut, err := client.GetQueueUrl(ctx, &awssqs.GetQueueUrlInput{QueueName: aws.String(dlqName)})
+	if err != nil {
+		t.Fatalf("dlq url: %v", err)
+	}
+	dlqURL := aws.ToString(dlqURLOut.QueueUrl)
+	dlqAttrs, err := client.GetQueueAttributes(ctx, &awssqs.GetQueueAttributesInput{
+		QueueUrl: aws.String(dlqURL), AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameQueueArn},
+	})
+	if err != nil {
+		t.Fatalf("dlq arn: %v", err)
+	}
+	dlqARN := dlqAttrs.Attributes[string(types.QueueAttributeNameQueueArn)]
+
+	redrive := fmt.Sprintf(`{"deadLetterTargetArn":%q,"maxReceiveCount":"5"}`, dlqARN)
+	_, err = client.CreateQueue(ctx, &awssqs.CreateQueueInput{
+		QueueName: aws.String(mainName),
+		Attributes: map[string]string{
+			"FifoQueue":                 "true",
+			"ContentBasedDeduplication": "false",
+			"VisibilityTimeout":         "30",
+			"RedrivePolicy":             redrive,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create main queue: %v", err)
+	}
+	mainURLOut, err := client.GetQueueUrl(ctx, &awssqs.GetQueueUrlInput{QueueName: aws.String(mainName)})
+	if err != nil {
+		t.Fatalf("main url: %v", err)
+	}
+	mainURL := aws.ToString(mainURLOut.QueueUrl)
+
+	t.Cleanup(func() {
+		_, _ = client.DeleteQueue(ctx, &awssqs.DeleteQueueInput{QueueUrl: aws.String(mainURL)})
+		_, _ = client.DeleteQueue(ctx, &awssqs.DeleteQueueInput{QueueUrl: aws.String(dlqURL)})
+	})
+
 	body, _ := json.Marshal(map[string]any{"not": "a wager envelope"})
 	dedup := uuid.NewString()
 	_, err = client.SendMessage(ctx, &awssqs.SendMessageInput{
-		QueueUrl:               aws.String(sharedWagerURL),
+		QueueUrl:               aws.String(mainURL),
 		MessageBody:            aws.String(string(body)),
 		MessageGroupId:         aws.String("poison-group-" + dedup),
 		MessageDeduplicationId: aws.String(dedup),
@@ -223,10 +276,11 @@ func TestSQS_PoisonGoesTowardDLQ(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Drive redrive by exhausting receives (maxReceiveCount=5).
+
+	// Drive redrive by exhausting receives (maxReceiveCount=5) on this queue only.
 	for i := 0; i < 6; i++ {
 		out, err := client.ReceiveMessage(ctx, &awssqs.ReceiveMessageInput{
-			QueueUrl:              aws.String(sharedWagerURL),
+			QueueUrl:              aws.String(mainURL),
 			MaxNumberOfMessages:   1,
 			WaitTimeSeconds:       2,
 			VisibilityTimeout:     1,
@@ -238,29 +292,30 @@ func TestSQS_PoisonGoesTowardDLQ(t *testing.T) {
 			continue
 		}
 		_, _ = client.ChangeMessageVisibility(ctx, &awssqs.ChangeMessageVisibilityInput{
-			QueueUrl: aws.String(sharedWagerURL), ReceiptHandle: out.Messages[0].ReceiptHandle, VisibilityTimeout: 0,
+			QueueUrl: aws.String(mainURL), ReceiptHandle: out.Messages[0].ReceiptHandle, VisibilityTimeout: 0,
 		})
 		time.Sleep(1200 * time.Millisecond)
 	}
+
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		out, err := client.ReceiveMessage(ctx, &awssqs.ReceiveMessageInput{
-			QueueUrl: aws.String(sharedDLQURL), MaxNumberOfMessages: 1, WaitTimeSeconds: 3,
+			QueueUrl: aws.String(dlqURL), MaxNumberOfMessages: 1, WaitTimeSeconds: 3,
 		})
 		if err == nil && len(out.Messages) > 0 {
 			_, _ = client.DeleteMessage(ctx, &awssqs.DeleteMessageInput{
-				QueueUrl: aws.String(sharedDLQURL), ReceiptHandle: out.Messages[0].ReceiptHandle,
+				QueueUrl: aws.String(dlqURL), ReceiptHandle: out.Messages[0].ReceiptHandle,
 			})
 			return
 		}
 	}
-	// LocalStack redrive can lag; assert the main queue no longer holds the poison message.
+	// LocalStack redrive can lag; assert the dedicated main queue no longer holds the poison message.
 	out, err := client.ReceiveMessage(ctx, &awssqs.ReceiveMessageInput{
-		QueueUrl: aws.String(sharedWagerURL), MaxNumberOfMessages: 1, WaitTimeSeconds: 1, VisibilityTimeout: 1,
+		QueueUrl: aws.String(mainURL), MaxNumberOfMessages: 1, WaitTimeSeconds: 1, VisibilityTimeout: 1,
 	})
 	if err == nil && len(out.Messages) == 0 {
-		t.Log("poison left the main queue (DLQ receive timed out; LocalStack redrive lag)")
+		t.Log("poison left the dedicated main queue (DLQ receive timed out; LocalStack redrive lag)")
 		return
 	}
-	t.Fatal("expected poison message in DLQ or removed from main queue after maxReceiveCount")
+	t.Fatal("expected poison message in dedicated DLQ or removed from dedicated main queue after maxReceiveCount")
 }
