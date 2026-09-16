@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -47,17 +48,14 @@ func NewMux(d Dependencies) http.Handler {
 	read := func(h http.HandlerFunc) http.Handler {
 		return authMW(auth.RequireRoles(auth.RoleWageringRead, auth.RoleWalletAdmin)(h))
 	}
-	adminOrRead := func(h http.HandlerFunc) http.Handler {
-		return authMW(auth.RequireRoles(auth.RoleWageringRead, auth.RoleWalletAdmin)(h))
-	}
 
-	mux.Handle("POST /wallets", internal(handleOpenWallet(d.OpenWallet)))
+	mux.Handle("POST /wallets", internal(handleOpenWallet(d.OpenWallet, d.Log)))
 	mux.Handle("POST /wallets/{walletId}/reconciliation", internal(handleReconcile(d.Reconcile, d.Metrics, d.Log)))
-	mux.Handle("GET /wallets/{walletId}", adminOrRead(handleGetWallet(d.GetWallet)))
-	mux.Handle("GET /wallets/{walletId}/ledger", adminOrRead(handleListLedger(d.ListLedger)))
-	mux.Handle("POST /wagering/transactions", write(handleProcessWager(d.ProcessWager, d.Metrics)))
-	mux.Handle("GET /wagering/transactions/{transactionId}", read(handleGetTxByID(d.GetTx)))
-	mux.Handle("GET /providers/{providerId}/wagering/transactions/{externalTransactionId}", read(handleGetTxByExternal(d.GetTx)))
+	mux.Handle("GET /wallets/{walletId}", internal(handleGetWallet(d.GetWallet, d.Log)))
+	mux.Handle("GET /wallets/{walletId}/ledger", internal(handleListLedger(d.ListLedger, d.Log)))
+	mux.Handle("POST /wagering/transactions", write(handleProcessWager(d.ProcessWager, d.Metrics, d.Log)))
+	mux.Handle("GET /wagering/transactions/{transactionId}", read(handleGetTxByID(d.GetTx, d.Log)))
+	mux.Handle("GET /providers/{providerId}/wagering/transactions/{externalTransactionId}", read(handleGetTxByExternal(d.GetTx, d.Log)))
 
 	return correlationMiddleware(mux)
 }
@@ -83,7 +81,7 @@ type openWalletRequest struct {
 	} `json:"initialBalance"`
 }
 
-func handleOpenWallet(uc *app.OpenWallet) http.HandlerFunc {
+func handleOpenWallet(uc *app.OpenWallet, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req openWalletRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -104,7 +102,7 @@ func handleOpenWallet(uc *app.OpenWallet) http.HandlerFunc {
 			PlayerID: playerID, InitialBalance: bal, CorrelationID: r.Header.Get("X-Correlation-Id"),
 		})
 		if err != nil {
-			mapDomainError(w, err)
+			mapDomainError(r.Context(), log, w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]any{
@@ -129,7 +127,7 @@ type wagerRequest struct {
 	ReferenceExternalTransactionID string `json:"referenceExternalTransactionId"`
 }
 
-func handleProcessWager(uc *app.ProcessWagerTransaction, metrics *observability.Metrics) http.HandlerFunc {
+func handleProcessWager(uc *app.ProcessWagerTransaction, metrics *observability.Metrics, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		p, ok := auth.FromContext(r.Context())
@@ -185,7 +183,7 @@ func handleProcessWager(uc *app.ProcessWagerTransaction, metrics *observability.
 					metrics.ConcurrencyConflicts.Inc()
 				}
 			}
-			mapDomainError(w, err)
+			mapDomainError(ctx, log, w, err)
 			return
 		}
 		if metrics != nil {
@@ -220,7 +218,7 @@ func writeWagerResult(w http.ResponseWriter, out app.ProcessWagerResult) {
 	writeJSON(w, status, body)
 }
 
-func handleGetWallet(uc *app.GetWallet) http.HandlerFunc {
+func handleGetWallet(uc *app.GetWallet, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := uuid.Parse(r.PathValue("walletId"))
 		if err != nil {
@@ -229,7 +227,7 @@ func handleGetWallet(uc *app.GetWallet) http.HandlerFunc {
 		}
 		wal, err := uc.Execute(r.Context(), id)
 		if err != nil {
-			mapDomainError(w, err)
+			mapDomainError(r.Context(), log, w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -239,7 +237,7 @@ func handleGetWallet(uc *app.GetWallet) http.HandlerFunc {
 	}
 }
 
-func handleListLedger(uc *app.ListLedger) http.HandlerFunc {
+func handleListLedger(uc *app.ListLedger, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := uuid.Parse(r.PathValue("walletId"))
 		if err != nil {
@@ -256,7 +254,7 @@ func handleListLedger(uc *app.ListLedger) http.HandlerFunc {
 			WalletID: id, Cursor: r.URL.Query().Get("cursor"), Limit: limit,
 		})
 		if err != nil {
-			mapDomainError(w, err)
+			mapDomainError(r.Context(), log, w, err)
 			return
 		}
 		items := make([]map[string]any, 0, len(out.Entries))
@@ -276,7 +274,7 @@ func handleListLedger(uc *app.ListLedger) http.HandlerFunc {
 	}
 }
 
-func handleGetTxByID(uc *app.GetTransaction) http.HandlerFunc {
+func handleGetTxByID(uc *app.GetTransaction, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, _ := auth.FromContext(r.Context())
 		id, err := uuid.Parse(r.PathValue("transactionId"))
@@ -286,7 +284,7 @@ func handleGetTxByID(uc *app.GetTransaction) http.HandlerFunc {
 		}
 		tx, err := uc.ByID(r.Context(), id)
 		if err != nil {
-			mapDomainError(w, err)
+			mapDomainError(r.Context(), log, w, err)
 			return
 		}
 		if tx.Origin() == wagering.OriginExternal {
@@ -302,7 +300,7 @@ func handleGetTxByID(uc *app.GetTransaction) http.HandlerFunc {
 	}
 }
 
-func handleGetTxByExternal(uc *app.GetTransaction) http.HandlerFunc {
+func handleGetTxByExternal(uc *app.GetTransaction, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, _ := auth.FromContext(r.Context())
 		providerID := r.PathValue("providerId")
@@ -312,7 +310,7 @@ func handleGetTxByExternal(uc *app.GetTransaction) http.HandlerFunc {
 		}
 		tx, err := uc.ByExternal(r.Context(), providerID, r.PathValue("externalTransactionId"))
 		if err != nil {
-			mapDomainError(w, err)
+			mapDomainError(r.Context(), log, w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, txBody(tx))
@@ -329,7 +327,7 @@ func handleReconcile(uc *app.ReconcileWallet, metrics *observability.Metrics, lo
 		ctx := observability.WithWalletID(r.Context(), id.String())
 		out, err := uc.Execute(ctx, id)
 		if err != nil {
-			mapDomainError(w, err)
+			mapDomainError(ctx, log, w, err)
 			return
 		}
 		l := observability.LoggerFromContext(log, ctx)
@@ -390,7 +388,7 @@ func moneyBody(m money.Money) map[string]string {
 	return map[string]string{"amount": m.String(), "currency": m.Currency()}
 }
 
-func mapDomainError(w http.ResponseWriter, err error) {
+func mapDomainError(ctx context.Context, log *slog.Logger, w http.ResponseWriter, err error) {
 	if errors.Is(err, apperr.ErrTransient) {
 		w.Header().Set("Retry-After", "2")
 		detail := "dependency unavailable"
@@ -422,6 +420,7 @@ func mapDomainError(w http.ResponseWriter, err error) {
 		writeProblem(w, http.StatusServiceUnavailable, "dependency unavailable", "")
 		return
 	}
+	observability.LoggerFromContext(log, ctx).Error("unhandled domain error", "error", err)
 	writeProblem(w, http.StatusInternalServerError, "internal error", "")
 }
 
