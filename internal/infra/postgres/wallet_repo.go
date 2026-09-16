@@ -28,6 +28,9 @@ func (r *WalletRepo) Insert(ctx context.Context, w wallet.Wallet) error {
 		w.ID(), w.PlayerID(), w.Currency(), w.Balance().AmountMinor(), w.Version(), w.CreatedAt(), w.UpdatedAt(),
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return apperr.WrapFailure(apperr.CodeConflict, "wallet already exists for player/currency", apperr.ErrConflict)
+		}
 		return fmt.Errorf("insert wallet: %w", err)
 	}
 	return nil

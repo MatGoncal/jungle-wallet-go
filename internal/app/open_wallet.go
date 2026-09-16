@@ -50,7 +50,7 @@ func (uc *OpenWallet) Execute(ctx context.Context, in OpenWalletInput) (OpenWall
 			return err
 		}
 		if err := repos.Wallets().Insert(ctx, w); err != nil {
-			return apperr.WrapFailure(apperr.CodeConflict, "wallet already exists for player/currency", err)
+			return err
 		}
 
 		if in.InitialBalance.IsPositive() {
