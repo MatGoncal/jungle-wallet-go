@@ -102,7 +102,7 @@ func (uc *ResolvePendingReference) Execute(ctx context.Context, in ResolvePendin
 		switch ref.Kind() {
 		case wagering.KindBet:
 			return proc.applyCreditWithRef(ctx, repos, tx, w, pwIn, &refID, now, &result)
-		case wagering.KindWin:
+		case wagering.KindWin, wagering.KindRefund:
 			if tx.Kind() != wagering.KindRollback {
 				return uc.rejectWithCode(ctx, repos, tx, w.Balance().AmountMinor(), apperr.CodeReferenceNotReversible, in.CorrelationID, now)
 			}

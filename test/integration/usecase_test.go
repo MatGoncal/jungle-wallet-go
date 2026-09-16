@@ -246,3 +246,76 @@ func TestReconciliation_RepeatableReadConsistent(t *testing.T) {
 		t.Fatalf("consistent=%v stored=%d", out.Consistent, out.StoredBalance.AmountMinor())
 	}
 }
+
+func TestProcessWager_RollbackOfRefundRestoresBalance(t *testing.T) {
+	pool := openPool(t)
+	uow := postgres.NewUnitOfWork(pool)
+	open := app.NewOpenWallet(uow)
+	process := app.NewProcessWagerTransaction(uow)
+	player := mustV7(t)
+	bal, _ := money.Parse("100.00", "BRL")
+	wal, err := open.Execute(context.Background(), app.OpenWalletInput{PlayerID: player, InitialBalance: bal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	betAmt, _ := money.Parse("25.00", "BRL")
+	bet, err := process.Execute(context.Background(), app.ProcessWagerInput{
+		ProviderID: "provider-a", ExternalTransactionID: "bet-rb-ref-1", IdempotencyKey: "idem-bet-rb-ref-1",
+		PlayerID: player, WalletID: wal.Wallet.ID(), RoundID: "r1", GameID: "g1",
+		Kind: wagering.KindBet, Money: betAmt, CorrelationID: "c-bet",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bet.Transaction.Status() != wagering.StatusProcessed || bet.Balance.AmountMinor() != 7500 {
+		t.Fatalf("bet status=%s bal=%d", bet.Transaction.Status(), bet.Balance.AmountMinor())
+	}
+
+	refund, err := process.Execute(context.Background(), app.ProcessWagerInput{
+		ProviderID: "provider-a", ExternalTransactionID: "refund-rb-ref-1", IdempotencyKey: "idem-refund-rb-ref-1",
+		PlayerID: player, WalletID: wal.Wallet.ID(), RoundID: "r1", GameID: "g1",
+		Kind: wagering.KindRefund, Money: betAmt, ReferenceExternalTransactionID: "bet-rb-ref-1",
+		CorrelationID: "c-refund",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refund.Transaction.Status() != wagering.StatusProcessed || refund.Balance.AmountMinor() != 10000 {
+		t.Fatalf("refund status=%s bal=%d", refund.Transaction.Status(), refund.Balance.AmountMinor())
+	}
+
+	rollback, err := process.Execute(context.Background(), app.ProcessWagerInput{
+		ProviderID: "provider-a", ExternalTransactionID: "rollback-rb-ref-1", IdempotencyKey: "idem-rollback-rb-ref-1",
+		PlayerID: player, WalletID: wal.Wallet.ID(), RoundID: "r1", GameID: "g1",
+		Kind: wagering.KindRollback, Money: betAmt, ReferenceExternalTransactionID: "refund-rb-ref-1",
+		CorrelationID: "c-rollback",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rollback.Transaction.Status() != wagering.StatusProcessed {
+		t.Fatalf("rollback status=%s code=%s", rollback.Transaction.Status(), rollback.Transaction.FailureCode())
+	}
+	if rollback.Balance.AmountMinor() != 7500 {
+		t.Fatalf("after rollback bal=%d want 7500", rollback.Balance.AmountMinor())
+	}
+
+	var stored, credits, debits int64
+	err = pool.QueryRow(context.Background(), `
+		SELECT w.balance_minor,
+		       COALESCE(SUM(CASE WHEN l.direction='CREDIT' THEN l.amount_minor ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN l.direction='DEBIT' THEN l.amount_minor ELSE 0 END),0)
+		FROM wallets w
+		LEFT JOIN wallet_ledger_entries l ON l.wallet_id = w.id
+		WHERE w.id = $1
+		GROUP BY w.balance_minor`, wal.Wallet.ID()).Scan(&stored, &credits, &debits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != credits-debits {
+		t.Fatalf("stored=%d credits-debits=%d (credits=%d debits=%d)", stored, credits-debits, credits, debits)
+	}
+	if stored != 7500 {
+		t.Fatalf("stored=%d want 7500", stored)
+	}
+}

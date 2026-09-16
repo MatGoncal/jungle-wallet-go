@@ -300,7 +300,8 @@ func (uc *ProcessWagerTransaction) processReversal(
 	switch ref.Kind() {
 	case wagering.KindBet:
 		return uc.applyCreditWithRef(ctx, repos, tx, w, in, &refID, now, result)
-	case wagering.KindWin:
+	case wagering.KindWin, wagering.KindRefund:
+		// WIN and REFUND both credited the wallet; only ROLLBACK may reverse them.
 		if tx.Kind() != wagering.KindRollback {
 			return rejectAndPersist(ctx, repos, tx, w.Balance(), apperr.CodeReferenceNotReversible, in, now, result)
 		}

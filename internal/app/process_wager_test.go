@@ -360,6 +360,53 @@ func TestProcessWagerPendingReference(t *testing.T) {
 	}
 }
 
+func TestProcessWagerRollbackOfProcessedRefund(t *testing.T) {
+	uow := newMemUoW()
+	player, wid := seedWallet(t, uow, "100.00")
+	uc := app.NewProcessWagerTransaction(uow)
+
+	bet, err := uc.Execute(context.Background(), app.ProcessWagerInput{
+		ProviderID: "provider-a", ExternalTransactionID: "bet-1", IdempotencyKey: "k-bet-1",
+		PlayerID: player, WalletID: wid, RoundID: "r1", GameID: "g1",
+		Kind: wagering.KindBet, Money: mustMoney(t, "40.00"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bet.Balance.String() != "60.00" {
+		t.Fatalf("after bet bal=%s", bet.Balance.String())
+	}
+
+	refund, err := uc.Execute(context.Background(), app.ProcessWagerInput{
+		ProviderID: "provider-a", ExternalTransactionID: "refund-1", IdempotencyKey: "k-refund-1",
+		PlayerID: player, WalletID: wid, RoundID: "r1", GameID: "g1",
+		Kind: wagering.KindRefund, Money: mustMoney(t, "40.00"),
+		ReferenceExternalTransactionID: "bet-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refund.Transaction.Status() != wagering.StatusProcessed || refund.Balance.String() != "100.00" {
+		t.Fatalf("refund status=%s bal=%s", refund.Transaction.Status(), refund.Balance.String())
+	}
+
+	rb, err := uc.Execute(context.Background(), app.ProcessWagerInput{
+		ProviderID: "provider-a", ExternalTransactionID: "rollback-1", IdempotencyKey: "k-rollback-1",
+		PlayerID: player, WalletID: wid, RoundID: "r1", GameID: "g1",
+		Kind: wagering.KindRollback, Money: mustMoney(t, "40.00"),
+		ReferenceExternalTransactionID: "refund-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rb.Transaction.Status() != wagering.StatusProcessed {
+		t.Fatalf("rollback status=%s code=%s", rb.Transaction.Status(), rb.Transaction.FailureCode())
+	}
+	if rb.Balance.String() != "60.00" {
+		t.Fatalf("after rollback bal=%s want 60.00", rb.Balance.String())
+	}
+}
+
 func mustMoney(t *testing.T, s string) money.Money {
 	t.Helper()
 	m, err := money.Parse(s, "BRL")
