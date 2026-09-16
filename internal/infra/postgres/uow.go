@@ -2,15 +2,19 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/matheusgoncalves/jungle-wallet-go/internal/app"
+	"github.com/matheusgoncalves/jungle-wallet-go/internal/domain/apperr"
 )
 
 type ctxKey struct{}
+
+const maxTransientTxAttempts = 3
 
 // UnitOfWork runs work inside a single pgx transaction and injects tx-bound repos.
 type UnitOfWork struct {
@@ -22,6 +26,23 @@ func NewUnitOfWork(pool *pgxpool.Pool) *UnitOfWork {
 }
 
 func (u *UnitOfWork) WithinTransaction(ctx context.Context, fn func(ctx context.Context, repos app.Repositories) error) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxTransientTxAttempts; attempt++ {
+		lastErr = u.withinTransactionOnce(ctx, fn)
+		if lastErr == nil {
+			return nil
+		}
+		if !isRetryableTxError(lastErr) || attempt == maxTransientTxAttempts {
+			break
+		}
+	}
+	if isRetryableTxError(lastErr) {
+		return fmt.Errorf("transaction retries exhausted: %w", errors.Join(lastErr, apperr.ErrTransient))
+	}
+	return lastErr
+}
+
+func (u *UnitOfWork) withinTransactionOnce(ctx context.Context, fn func(ctx context.Context, repos app.Repositories) error) error {
 	tx, err := u.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -37,6 +58,15 @@ func (u *UnitOfWork) WithinTransaction(ctx context.Context, fn func(ctx context.
 		return fmt.Errorf("commit tx: %w", err)
 	}
 	return nil
+}
+
+func isRetryableTxError(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	// 40P01 = deadlock_detected; 40001 = serialization_failure
+	return pgErr.Code == "40P01" || pgErr.Code == "40001"
 }
 
 type repositories struct {

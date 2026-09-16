@@ -391,6 +391,15 @@ func moneyBody(m money.Money) map[string]string {
 }
 
 func mapDomainError(w http.ResponseWriter, err error) {
+	if errors.Is(err, apperr.ErrTransient) {
+		w.Header().Set("Retry-After", "2")
+		detail := "dependency unavailable"
+		if f, ok := apperr.AsFailure(err); ok && f.Message != "" {
+			detail = f.Message
+		}
+		writeProblem(w, http.StatusServiceUnavailable, detail, "")
+		return
+	}
 	if f, ok := apperr.AsFailure(err); ok {
 		switch {
 		case errors.Is(err, apperr.ErrUnauthorized):
@@ -401,9 +410,6 @@ func mapDomainError(w http.ResponseWriter, err error) {
 			writeProblem(w, http.StatusNotFound, f.Message, string(f.Code))
 		case errors.Is(err, apperr.ErrConflict) || f.Code == apperr.CodeConflict:
 			writeProblem(w, http.StatusConflict, f.Message, string(f.Code))
-		case errors.Is(err, apperr.ErrTransient):
-			w.Header().Set("Retry-After", "2")
-			writeProblem(w, http.StatusServiceUnavailable, f.Message, string(f.Code))
 		case f.Code == apperr.CodeInvalidInput || f.Code == apperr.CodeInvalidAmount || f.Code == apperr.CodeKindNotAllowed:
 			writeProblem(w, http.StatusBadRequest, f.Message, string(f.Code))
 		default:

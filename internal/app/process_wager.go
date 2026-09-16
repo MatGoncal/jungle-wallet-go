@@ -87,6 +87,25 @@ func (uc *ProcessWagerTransaction) ExecuteInTx(
 		)
 	}
 
+	// Resolve idempotent replay/conflict with a plain SELECT first so a
+	// duplicate request never takes FOR KEY SHARE on the wallet row.
+	if existing, ok, err := repos.Transactions().GetByIdempotencyKey(ctx, in.ProviderID, in.IdempotencyKey); err != nil {
+		return result, err
+	} else if ok {
+		if err := uc.replayOrConflict(ctx, repos, existing, hash, &result); err != nil {
+			return result, err
+		}
+		return result, nil
+	}
+
+	// Lock the wallet before INSERT into wager_transactions. Inserting first
+	// acquires FOR KEY SHARE on wallets(id); two concurrent bets then both
+	// ask FOR UPDATE and deadlock (40P01).
+	w, err := repos.Wallets().GetForUpdate(ctx, in.WalletID)
+	if err != nil {
+		return result, err
+	}
+
 	inserted, existing, err := repos.Transactions().TryInsertIdempotency(ctx, pending)
 	if err != nil {
 		return result, mapInsertConflict(err)
@@ -98,10 +117,6 @@ func (uc *ProcessWagerTransaction) ExecuteInTx(
 		return result, nil
 	}
 
-	w, err := repos.Wallets().GetForUpdate(ctx, in.WalletID)
-	if err != nil {
-		return result, err
-	}
 	if w.PlayerID() != in.PlayerID {
 		if err := rejectAndPersist(ctx, repos, pending, w.Balance(), apperr.CodePlayerWalletMismatch, in, now, &result); err != nil {
 			return result, err
