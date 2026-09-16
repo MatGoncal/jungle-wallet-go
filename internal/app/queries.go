@@ -169,24 +169,13 @@ func (uc *ReconcileWallet) Execute(ctx context.Context, walletID uuid.UUID) (Rec
 		if err != nil {
 			return err
 		}
-		entries, err := repos.Ledger().ListByWallet(ctx, walletID, nil, nil, 100_000)
+		netMinor, entryCount, err := repos.Ledger().SumByWallet(ctx, walletID)
 		if err != nil {
 			return err
 		}
-		calc, err := money.Zero(w.Currency())
+		calc, err := money.FromMinor(netMinor, w.Currency())
 		if err != nil {
 			return err
-		}
-		for _, e := range entries {
-			switch e.Direction() {
-			case wallet.DirectionCredit:
-				calc, err = calc.Add(e.Amount())
-			case wallet.DirectionDebit:
-				calc, err = calc.Sub(e.Amount())
-			}
-			if err != nil {
-				return err
-			}
 		}
 		diffMinor := w.Balance().AmountMinor() - calc.AmountMinor()
 		diff, err := money.FromMinor(diffMinor, w.Currency())
@@ -199,7 +188,7 @@ func (uc *ReconcileWallet) Execute(ctx context.Context, walletID uuid.UUID) (Rec
 			CalculatedBalance: calc,
 			Difference:        diff,
 			Consistent:        diff.IsZero(),
-			CheckedEntries:    len(entries),
+			CheckedEntries:    entryCount,
 		}
 		return nil
 	})

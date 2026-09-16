@@ -35,6 +35,26 @@ func (r *LedgerRepo) Insert(ctx context.Context, entry wallet.LedgerEntry) error
 	return nil
 }
 
+func (r *LedgerRepo) SumByWallet(ctx context.Context, walletID uuid.UUID) (netMinor int64, entryCount int, err error) {
+	err = r.q.QueryRow(ctx, `
+		SELECT
+			COUNT(*)::int,
+			COALESCE(SUM(
+				CASE
+					WHEN direction = 'CREDIT' THEN amount_minor
+					WHEN direction = 'DEBIT' THEN -amount_minor
+					ELSE 0
+				END
+			), 0)
+		FROM wallet_ledger_entries
+		WHERE wallet_id = $1`, walletID,
+	).Scan(&entryCount, &netMinor)
+	if err != nil {
+		return 0, 0, fmt.Errorf("sum ledger: %w", err)
+	}
+	return netMinor, entryCount, nil
+}
+
 func (r *LedgerRepo) ListByWallet(
 	ctx context.Context,
 	walletID uuid.UUID,

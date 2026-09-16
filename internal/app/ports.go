@@ -48,6 +48,8 @@ type TransactionRepository interface {
 type LedgerRepository interface {
 	Insert(ctx context.Context, entry wallet.LedgerEntry) error
 	ListByWallet(ctx context.Context, walletID uuid.UUID, afterCreatedAt *time.Time, afterID *uuid.UUID, limit int) ([]wallet.LedgerEntry, error)
+	// SumByWallet returns net balance in minor units (credits − debits) and entry count.
+	SumByWallet(ctx context.Context, walletID uuid.UUID) (netMinor int64, entryCount int, err error)
 }
 
 type InboxRepository interface {
