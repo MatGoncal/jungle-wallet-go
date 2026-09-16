@@ -36,7 +36,7 @@ services:
   localstack:
     image: localstack/localstack:4.3
     environment:
-      SERVICES: sqs
+      SERVICES: sqs,iam
       DEBUG: "0"
       AWS_DEFAULT_REGION: us-east-1
     ports:
@@ -63,7 +63,12 @@ services:
     volumes:
       - ./keycloak/jungle-wallet-realm.json:/opt/keycloak/data/import/jungle-wallet-realm.json:ro
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      # Port open is not enough — wait until the imported realm answers.
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /realms/jungle-wallet HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3; cat <&3 | head -n1 | grep -Eq 'HTTP/1\\.[01] 200'",
+        ]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -83,7 +88,7 @@ services:
       localstack:
         condition: service_healthy
       keycloak:
-        condition: service_started
+        condition: service_healthy
     environment:
       HTTP_ADDR: ":8080"
       DATABASE_URL: postgres://wallet_app:wallet_app@postgres:5432/wallet?sslmode=disable
