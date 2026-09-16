@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,8 @@ import (
 )
 
 var (
-	sharedDBURL       string
+	sharedDBURL       string // application role (wallet_app)
+	sharedMigrateURL  string // table owner (wallet) — migrations only
 	sharedSQSEndpoint string
 	sharedWagerURL    string
 	sharedEventsURL   string
@@ -40,6 +42,11 @@ var (
 	repoRoot          string
 )
 
+const (
+	defaultAppDBURL     = "postgres://wallet_app:wallet_app@localhost:55432/wallet?sslmode=disable"
+	defaultMigrateDBURL = "postgres://wallet:wallet@localhost:55432/wallet?sslmode=disable"
+)
+
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -47,7 +54,8 @@ func TestMain(m *testing.M) {
 	migrationsDir = filepath.Join(repoRoot, "migrations")
 
 	if os.Getenv("SKIP_TESTCONTAINERS") == "1" || os.Getenv("USE_COMPOSE") == "1" {
-		sharedDBURL = getenv("DATABASE_URL", "postgres://wallet:wallet@localhost:55432/wallet?sslmode=disable")
+		sharedMigrateURL = getenv("MIGRATE_DATABASE_URL", defaultMigrateDBURL)
+		sharedDBURL = getenv("DATABASE_URL", defaultAppDBURL)
 		sharedSQSEndpoint = getenv("SQS_ENDPOINT", "http://localhost:4566")
 		sharedWagerURL = getenv("SQS_WAGER_QUEUE_URL", sharedSQSEndpoint+"/000000000000/wager-transactions.fifo")
 		sharedEventsURL = getenv("SQS_EVENTS_QUEUE_URL", sharedSQSEndpoint+"/000000000000/wallet-events.fifo")
@@ -91,9 +99,14 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "postgres url: %v\n", err)
 		os.Exit(1)
 	}
-	sharedDBURL = dbURL
-	if err := applyMigrations(dbURL); err != nil {
+	sharedMigrateURL = dbURL
+	if err := applyMigrations(sharedMigrateURL); err != nil {
 		fmt.Fprintf(os.Stderr, "migrate up: %v\n", err)
+		os.Exit(1)
+	}
+	sharedDBURL, err = withDBRole(sharedMigrateURL, "wallet_app", "wallet_app")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "app db url: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -219,7 +232,8 @@ func runWithCompose(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "compose up: %v\n", err)
 		return 1
 	}
-	sharedDBURL = "postgres://wallet:wallet@localhost:55432/wallet?sslmode=disable"
+	sharedMigrateURL = defaultMigrateDBURL
+	sharedDBURL = defaultAppDBURL
 	sharedSQSEndpoint = "http://localhost:4566"
 	sharedWagerURL = sharedSQSEndpoint + "/000000000000/wager-transactions.fifo"
 	sharedEventsURL = sharedSQSEndpoint + "/000000000000/wallet-events.fifo"
@@ -266,6 +280,15 @@ func getenv(k, d string) string {
 		return v
 	}
 	return d
+}
+
+func withDBRole(dbURL, user, pass string) (string, error) {
+	u, err := url.Parse(dbURL)
+	if err != nil {
+		return "", err
+	}
+	u.User = url.UserPassword(user, pass)
+	return u.String(), nil
 }
 
 func applyMigrations(dbURL string) error {

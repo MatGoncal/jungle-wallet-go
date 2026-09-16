@@ -27,7 +27,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		HTTPAddr:           getenv("HTTP_ADDR", ":8080"),
-		DatabaseURL:        getenv("DATABASE_URL", "postgres://wallet:wallet@localhost:55432/wallet?sslmode=disable"),
+		DatabaseURL:        getenv("DATABASE_URL", "postgres://wallet_app:wallet_app@localhost:55432/wallet?sslmode=disable"),
 		SQSEndpoint:        getenv("SQS_ENDPOINT", "http://localhost:4566"),
 		SQSRegion:          getenv("AWS_REGION", "us-east-1"),
 		SQSAccessKeyID:     getenv("AWS_ACCESS_KEY_ID", "test"),

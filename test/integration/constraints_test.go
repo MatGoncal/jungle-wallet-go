@@ -4,11 +4,13 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/matheusgoncalves/jungle-wallet-go/internal/app"
 	"github.com/matheusgoncalves/jungle-wallet-go/internal/domain/money"
 	"github.com/matheusgoncalves/jungle-wallet-go/internal/domain/wallet"
@@ -20,10 +22,10 @@ func TestMigrations_UpDownUp(t *testing.T) {
 		sharedPool.Close()
 		sharedPool = nil
 	}
-	if err := migrateDown(sharedDBURL); err != nil {
+	if err := migrateDown(sharedMigrateURL); err != nil {
 		t.Fatalf("down: %v", err)
 	}
-	if err := migrateUp(sharedDBURL); err != nil {
+	if err := migrateUp(sharedMigrateURL); err != nil {
 		t.Fatalf("up again: %v", err)
 	}
 	pool := openPool(t)
@@ -169,6 +171,55 @@ func TestConstraints_LedgerMathAndAppendOnly(t *testing.T) {
 		) VALUES ($1,$2,$3,'DEBIT',1000,'BRL',10000,9000,NOW())`, mustV7(t), walletID, txID)
 	if err == nil {
 		t.Fatal("expected unique (wallet_id, transaction_id)")
+	}
+}
+
+// TestLedger_AppRoleCannotBypassAppendOnly proves the second defense layer:
+// wallet_app is not table owner (cannot DROP the trigger) and has no UPDATE privilege
+// (SQLSTATE 42501), so the append-only rule is not only a trigger the app could remove.
+func TestLedger_AppRoleCannotBypassAppendOnly(t *testing.T) {
+	appPool := openPool(t)
+	var role string
+	if err := appPool.QueryRow(context.Background(), `SELECT current_user`).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if role != "wallet_app" {
+		t.Fatalf("expected current_user=wallet_app, got %q (DATABASE_URL must use the app role)", role)
+	}
+
+	walletID, player, txID, entryID := mustV7(t), mustV7(t), mustV7(t), mustV7(t)
+	insertWallet(t, appPool, walletID, player, 10000)
+	_, err := appPool.Exec(context.Background(), `
+		INSERT INTO wager_transactions (
+			id, origin, provider_id, external_transaction_id, idempotency_key, payload_hash,
+			wallet_id, player_id, round_id, game_id, kind, amount_minor, currency, status, created_at, updated_at
+		) VALUES ($1,'EXTERNAL','provider-a',$2,$3,'h',$4,$5,'r','g','BET',1000,'BRL','PROCESSED',NOW(),NOW())`,
+		txID, "ext-app-role", "key-app-role", walletID, player)
+	if err != nil {
+		t.Fatalf("tx: %v", err)
+	}
+	_, err = appPool.Exec(context.Background(), `
+		INSERT INTO wallet_ledger_entries (
+			id, wallet_id, transaction_id, direction, amount_minor, currency, balance_before, balance_after, created_at
+		) VALUES ($1,$2,$3,'DEBIT',1000,'BRL',10000,9000,NOW())`, entryID, walletID, txID)
+	if err != nil {
+		t.Fatalf("ledger insert (allowed): %v", err)
+	}
+
+	_, err = appPool.Exec(context.Background(), `
+		DROP TRIGGER IF EXISTS wallet_ledger_append_only ON wallet_ledger_entries`)
+	if err == nil {
+		t.Fatal("wallet_app must not be able to DROP the append-only trigger")
+	}
+
+	_, err = appPool.Exec(context.Background(), `
+		UPDATE wallet_ledger_entries SET amount_minor = 1 WHERE id = $1`, entryID)
+	if err == nil {
+		t.Fatal("expected UPDATE to fail for wallet_app")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("expected permission denied (42501), got %v", err)
 	}
 }
 

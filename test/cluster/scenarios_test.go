@@ -46,7 +46,7 @@ func TestMain(m *testing.M) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../.."))
 
-	dbURL = getenv("DATABASE_URL", "postgres://wallet:wallet@localhost:55432/wallet?sslmode=disable")
+	dbURL = getenv("DATABASE_URL", "postgres://wallet_app:wallet_app@localhost:55432/wallet?sslmode=disable")
 	sqsEndpoint = getenv("SQS_ENDPOINT", "http://localhost:4566")
 	wagerURL = getenv("SQS_WAGER_QUEUE_URL", sqsEndpoint+"/000000000000/wager-transactions.fifo")
 	eventsURL = getenv("SQS_EVENTS_QUEUE_URL", sqsEndpoint+"/000000000000/wallet-events.fifo")
