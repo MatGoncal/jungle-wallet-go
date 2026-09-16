@@ -172,6 +172,8 @@ func (c *Consumer) loop(ctx context.Context) {
 			time.Sleep(time.Second)
 			continue
 		}
+		groups := make(map[string][]types.Message)
+		groupOrder := make([]string, 0)
 		for _, msg := range out.Messages {
 			if ctx.Err() != nil {
 				// Stop accepting new work; release visibility so another instance can pick up.
@@ -182,21 +184,52 @@ func (c *Consumer) loop(ctx context.Context) {
 				})
 				continue
 			}
+			gid := messageGroupID(msg)
+			if _, seen := groups[gid]; !seen {
+				groupOrder = append(groupOrder, gid)
+			}
+			groups[gid] = append(groups[gid], msg)
+		}
+		for _, gid := range groupOrder {
+			msgs := groups[gid]
 			c.wg.Add(1)
-			c.track(msg)
-			func(msg types.Message) {
+			go func(msgs []types.Message) {
 				defer c.wg.Done()
-				defer c.untrack(msg)
-				if err := c.handle(ctx, msg); err != nil {
-					observability.LoggerFromContext(c.log, ctx).Error(
-						"sqs message handling failed",
-						"error", err,
-						"messageId", aws.ToString(msg.MessageId),
-					)
+				for _, msg := range msgs {
+					if ctx.Err() != nil {
+						_, _ = c.client.SQS().ChangeMessageVisibility(ctx, &awssqs.ChangeMessageVisibilityInput{
+							QueueUrl:          aws.String(c.cfg.WagerQueueURL),
+							ReceiptHandle:     msg.ReceiptHandle,
+							VisibilityTimeout: 0,
+						})
+						continue
+					}
+					c.track(msg)
+					if err := c.handle(ctx, msg); err != nil {
+						observability.LoggerFromContext(c.log, ctx).Error(
+							"sqs message handling failed",
+							"error", err,
+							"messageId", aws.ToString(msg.MessageId),
+						)
+					}
+					c.untrack(msg)
 				}
-			}(msg)
+			}(msgs)
 		}
 	}
+}
+
+func messageGroupID(msg types.Message) string {
+	if msg.Attributes != nil {
+		if g := msg.Attributes[string(types.MessageSystemAttributeNameMessageGroupId)]; g != "" {
+			return g
+		}
+		if g := msg.Attributes["MessageGroupId"]; g != "" {
+			return g
+		}
+	}
+	// Malformed / non-FIFO fallback: isolate so order within a real group is preserved.
+	return aws.ToString(msg.MessageId)
 }
 
 func (c *Consumer) handle(ctx context.Context, msg types.Message) error {
