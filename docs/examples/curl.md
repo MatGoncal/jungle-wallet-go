@@ -2,6 +2,8 @@
 
 Pré-requisito: stack no ar (`make bootstrap` ou `make up` + migrate). API em `http://localhost:18080`.
 
+Para o fluxo inteiro encadeado (token → carteira → BET/WIN/LOSS → replay → REFUND/ROLLBACK → leituras → reconciliação), use a collection Postman em [`jungle-wallet.postman_collection.json`](jungle-wallet.postman_collection.json) com o environment [`jungle-wallet.local.postman_environment.json`](jungle-wallet.local.postman_environment.json), ou `newman run` (ver README).
+
 ## Tokens
 
 ```sh

@@ -2,7 +2,7 @@
 
 Serviço de carteira e apostas em Go (desafio Jungle Gaming): API HTTP + consumidor SQS FIFO, com PostgreSQL, Keycloak (OIDC) e LocalStack.
 
-Requisitos: [`docs/CHALLENGE.md`](docs/CHALLENGE.md). Decisões: [`ARCHITECTURE.md`](ARCHITECTURE.md). Rastreio: [`docs/REQUIREMENTS-TRACE.md`](docs/REQUIREMENTS-TRACE.md). Agentes: [`AGENTS.md`](AGENTS.md). Exemplos: [`docs/examples/curl.md`](docs/examples/curl.md). Diagramas: [`docs/diagrams/`](docs/diagrams/).
+Requisitos: [`docs/CHALLENGE.md`](docs/CHALLENGE.md). Decisões: [`ARCHITECTURE.md`](ARCHITECTURE.md). Rastreio: [`docs/REQUIREMENTS-TRACE.md`](docs/REQUIREMENTS-TRACE.md). Agentes: [`AGENTS.md`](AGENTS.md). Exemplos: [`docs/examples/curl.md`](docs/examples/curl.md). Collection Postman: [`docs/examples/jungle-wallet.postman_collection.json`](docs/examples/jungle-wallet.postman_collection.json). Diagramas: [`docs/diagrams/`](docs/diagrams/).
 
 ## Pré-requisitos
 
@@ -125,6 +125,22 @@ curl -sS -X POST "http://localhost:8081/realms/jungle-wallet/protocol/openid-con
 ```
 
 Fluxos autenticados completos: [`docs/examples/curl.md`](docs/examples/curl.md).
+
+## Collection Postman (fumaça)
+
+Importe no Postman:
+
+- Collection: [`docs/examples/jungle-wallet.postman_collection.json`](docs/examples/jungle-wallet.postman_collection.json)
+- Environment: [`docs/examples/jungle-wallet.local.postman_environment.json`](docs/examples/jungle-wallet.local.postman_environment.json)
+
+Rode de cima para baixo no Collection Runner (stack no ar). Cada request guarda variáveis (`accessToken`, `internalToken`, `walletId`, …) e asserta status/campos.
+
+Via CLI ([newman](https://www.npmjs.com/package/newman)):
+
+```sh
+newman run docs/examples/jungle-wallet.postman_collection.json \
+  -e docs/examples/jungle-wallet.local.postman_environment.json
+```
 
 ## Testes
 
