@@ -178,6 +178,22 @@ func (m *memLedger) ListByWallet(_ context.Context, walletID uuid.UUID, _ *time.
 	return out, nil
 }
 
+func (m *memLedger) SumByWallet(_ context.Context, walletID uuid.UUID) (netMinor int64, entryCount int, err error) {
+	for _, e := range m.u.ledger {
+		if e.WalletID() != walletID {
+			continue
+		}
+		entryCount++
+		switch e.Direction() {
+		case wallet.DirectionCredit:
+			netMinor += e.Amount().AmountMinor()
+		case wallet.DirectionDebit:
+			netMinor -= e.Amount().AmountMinor()
+		}
+	}
+	return netMinor, entryCount, nil
+}
+
 type memInbox struct{ u *memUoW }
 
 func (m *memInbox) Insert(_ context.Context, consumerName, messageID, payloadHash string) (bool, error) {

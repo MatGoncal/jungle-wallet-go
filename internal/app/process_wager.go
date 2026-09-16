@@ -51,14 +51,14 @@ func NewProcessWagerTransaction(uow UnitOfWork) *ProcessWagerTransaction {
 }
 
 func (uc *ProcessWagerTransaction) Execute(ctx context.Context, in ProcessWagerInput) (ProcessWagerResult, error) {
-	pending, hash, ttl, maxAttempts, now, err := uc.prepare(in)
+	pending, hash, ttl, now, err := uc.prepare(in)
 	if err != nil {
 		return ProcessWagerResult{}, err
 	}
 	var result ProcessWagerResult
 	err = uc.uow.WithinTransaction(ctx, func(ctx context.Context, repos Repositories) error {
 		var err error
-		result, err = uc.ExecuteInTx(ctx, repos, in, pending, hash, ttl, maxAttempts, now)
+		result, err = uc.ExecuteInTx(ctx, repos, in, pending, hash, ttl, now)
 		return err
 	})
 	return result, err
@@ -73,7 +73,6 @@ func (uc *ProcessWagerTransaction) ExecuteInTx(
 	pending wagering.WagerTransaction,
 	hash string,
 	ttl time.Duration,
-	maxAttempts int,
 	now time.Time,
 ) (ProcessWagerResult, error) {
 	var result ProcessWagerResult
@@ -131,7 +130,7 @@ func (uc *ProcessWagerTransaction) ExecuteInTx(
 	}
 
 	if in.Kind == wagering.KindRefund || in.Kind == wagering.KindRollback {
-		if err := uc.processReversal(ctx, repos, pending, w, in, ttl, maxAttempts, now, &result); err != nil {
+		if err := uc.processReversal(ctx, repos, pending, w, in, ttl, now, &result); err != nil {
 			return result, err
 		}
 		return result, nil
@@ -144,19 +143,19 @@ func (uc *ProcessWagerTransaction) ExecuteInTx(
 
 // ExecuteWithRepos is used by the SQS consumer inside an open transaction (inbox + domain).
 func (uc *ProcessWagerTransaction) ExecuteWithRepos(ctx context.Context, repos Repositories, in ProcessWagerInput) (ProcessWagerResult, error) {
-	pending, hash, ttl, maxAttempts, now, err := uc.prepare(in)
+	pending, hash, ttl, now, err := uc.prepare(in)
 	if err != nil {
 		return ProcessWagerResult{}, err
 	}
-	return uc.ExecuteInTx(ctx, repos, in, pending, hash, ttl, maxAttempts, now)
+	return uc.ExecuteInTx(ctx, repos, in, pending, hash, ttl, now)
 }
 
-func (uc *ProcessWagerTransaction) prepare(in ProcessWagerInput) (wagering.WagerTransaction, string, time.Duration, int, time.Time, error) {
+func (uc *ProcessWagerTransaction) prepare(in ProcessWagerInput) (wagering.WagerTransaction, string, time.Duration, time.Time, error) {
 	if in.IdempotencyKey == "" {
-		return wagering.WagerTransaction{}, "", 0, 0, time.Time{}, apperr.WrapFailure(apperr.CodeInvalidInput, "Idempotency-Key required", apperr.ErrInvalidArgument)
+		return wagering.WagerTransaction{}, "", 0, time.Time{}, apperr.WrapFailure(apperr.CodeInvalidInput, "Idempotency-Key required", apperr.ErrInvalidArgument)
 	}
 	if in.Kind == wagering.KindOpening {
-		return wagering.WagerTransaction{}, "", 0, 0, time.Time{}, apperr.NewFailure(apperr.CodeKindNotAllowed, "OPENING is not allowed via external channels")
+		return wagering.WagerTransaction{}, "", 0, time.Time{}, apperr.NewFailure(apperr.CodeKindNotAllowed, "OPENING is not allowed via external channels")
 	}
 
 	hash, err := wagering.CanonicalHash(wagering.IdempotencyInput{
@@ -171,7 +170,7 @@ func (uc *ProcessWagerTransaction) prepare(in ProcessWagerInput) (wagering.Wager
 		ReferenceExternalTransactionID: in.ReferenceExternalTransactionID,
 	})
 	if err != nil {
-		return wagering.WagerTransaction{}, "", 0, 0, time.Time{}, err
+		return wagering.WagerTransaction{}, "", 0, time.Time{}, err
 	}
 
 	txID, err := uuid.NewV7()
@@ -195,18 +194,14 @@ func (uc *ProcessWagerTransaction) prepare(in ProcessWagerInput) (wagering.Wager
 		Now:                            now,
 	})
 	if err != nil {
-		return wagering.WagerTransaction{}, "", 0, 0, time.Time{}, err
+		return wagering.WagerTransaction{}, "", 0, time.Time{}, err
 	}
 
 	ttl := in.ReferenceTTL
 	if ttl <= 0 {
 		ttl = DefaultReferenceTTL
 	}
-	maxAttempts := in.ReferenceMaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = DefaultReferenceMaxTries
-	}
-	return pending, hash, ttl, maxAttempts, now, nil
+	return pending, hash, ttl, now, nil
 }
 
 func (uc *ProcessWagerTransaction) replayOrConflict(
@@ -261,7 +256,6 @@ func (uc *ProcessWagerTransaction) processReversal(
 	w wallet.Wallet,
 	in ProcessWagerInput,
 	ttl time.Duration,
-	maxAttempts int,
 	now time.Time,
 	result *ProcessWagerResult,
 ) error {
@@ -270,16 +264,16 @@ func (uc *ProcessWagerTransaction) processReversal(
 		return err
 	}
 	if !ok {
-		return uc.parkPendingReference(ctx, repos, tx, w, in, ttl, maxAttempts, now, result)
+		return uc.parkPendingReference(ctx, repos, tx, w, in, ttl, now, result)
 	}
 	if ref.Status() == wagering.StatusPendingReference {
-		return uc.parkPendingReference(ctx, repos, tx, w, in, ttl, maxAttempts, now, result)
+		return uc.parkPendingReference(ctx, repos, tx, w, in, ttl, now, result)
 	}
 	if ref.Status() == wagering.StatusRejected || ref.Status() == wagering.StatusFailed {
 		return rejectAndPersist(ctx, repos, tx, w.Balance(), apperr.CodeReferenceNotProcessed, in, now, result)
 	}
 	if ref.Status() != wagering.StatusProcessed {
-		return uc.parkPendingReference(ctx, repos, tx, w, in, ttl, maxAttempts, now, result)
+		return uc.parkPendingReference(ctx, repos, tx, w, in, ttl, now, result)
 	}
 
 	if err := validateReferenceMatch(tx, ref); err != nil {
@@ -299,13 +293,13 @@ func (uc *ProcessWagerTransaction) processReversal(
 	refID := ref.ID()
 	switch ref.Kind() {
 	case wagering.KindBet:
-		return uc.applyCreditWithRef(ctx, repos, tx, w, in, &refID, now, result)
+		return applyCreditWithRef(ctx, repos, tx, w, in, &refID, now, result)
 	case wagering.KindWin, wagering.KindRefund:
 		// WIN and REFUND both credited the wallet; only ROLLBACK may reverse them.
 		if tx.Kind() != wagering.KindRollback {
 			return rejectAndPersist(ctx, repos, tx, w.Balance(), apperr.CodeReferenceNotReversible, in, now, result)
 		}
-		return uc.applyDebitWithRef(ctx, repos, tx, w, in, &refID, now, apperr.CodeReversalInsufficientFunds, result)
+		return applyDebitWithRef(ctx, repos, tx, w, in, &refID, now, apperr.CodeReversalInsufficientFunds, result)
 	default:
 		return rejectAndPersist(ctx, repos, tx, w.Balance(), apperr.CodeReferenceNotReversible, in, now, result)
 	}
@@ -318,11 +312,9 @@ func (uc *ProcessWagerTransaction) parkPendingReference(
 	w wallet.Wallet,
 	in ProcessWagerInput,
 	ttl time.Duration,
-	maxAttempts int,
 	now time.Time,
 	result *ProcessWagerResult,
 ) error {
-	_ = maxAttempts
 	parked, err := tx.MarkPendingReference(now)
 	if err != nil {
 		return err
@@ -360,10 +352,10 @@ func (uc *ProcessWagerTransaction) applyDebit(
 	fundsCode apperr.Code,
 	result *ProcessWagerResult,
 ) error {
-	return uc.applyDebitWithRef(ctx, repos, tx, w, in, nil, now, fundsCode, result)
+	return applyDebitWithRef(ctx, repos, tx, w, in, nil, now, fundsCode, result)
 }
 
-func (uc *ProcessWagerTransaction) applyDebitWithRef(
+func applyDebitWithRef(
 	ctx context.Context,
 	repos Repositories,
 	tx wagering.WagerTransaction,
@@ -386,7 +378,7 @@ func (uc *ProcessWagerTransaction) applyDebitWithRef(
 		}
 		return err
 	}
-	return uc.commitMovement(ctx, repos, tx, mov, expectedVersion, refID, in, now, result)
+	return commitMovement(ctx, repos, tx, mov, expectedVersion, refID, in, now, result)
 }
 
 func (uc *ProcessWagerTransaction) applyCredit(
@@ -398,10 +390,10 @@ func (uc *ProcessWagerTransaction) applyCredit(
 	now time.Time,
 	result *ProcessWagerResult,
 ) error {
-	return uc.applyCreditWithRef(ctx, repos, tx, w, in, nil, now, result)
+	return applyCreditWithRef(ctx, repos, tx, w, in, nil, now, result)
 }
 
-func (uc *ProcessWagerTransaction) applyCreditWithRef(
+func applyCreditWithRef(
 	ctx context.Context,
 	repos Repositories,
 	tx wagering.WagerTransaction,
@@ -420,7 +412,7 @@ func (uc *ProcessWagerTransaction) applyCreditWithRef(
 	if err != nil {
 		return err
 	}
-	return uc.commitMovement(ctx, repos, tx, mov, expectedVersion, refID, in, now, result)
+	return commitMovement(ctx, repos, tx, mov, expectedVersion, refID, in, now, result)
 }
 
 func (uc *ProcessWagerTransaction) applyLoss(
@@ -455,7 +447,7 @@ func (uc *ProcessWagerTransaction) applyLoss(
 	return nil
 }
 
-func (uc *ProcessWagerTransaction) commitMovement(
+func commitMovement(
 	ctx context.Context,
 	repos Repositories,
 	tx wagering.WagerTransaction,

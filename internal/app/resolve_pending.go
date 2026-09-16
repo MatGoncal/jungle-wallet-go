@@ -96,17 +96,16 @@ func (uc *ResolvePendingReference) Execute(ctx context.Context, in ResolvePendin
 			ReferenceExternalTransactionID: tx.ReferenceExternalTransactionID(),
 			CorrelationID:                  in.CorrelationID,
 		}
-		proc := &ProcessWagerTransaction{}
 		refID := ref.ID()
 		var result ProcessWagerResult
 		switch ref.Kind() {
 		case wagering.KindBet:
-			return proc.applyCreditWithRef(ctx, repos, tx, w, pwIn, &refID, now, &result)
+			return applyCreditWithRef(ctx, repos, tx, w, pwIn, &refID, now, &result)
 		case wagering.KindWin, wagering.KindRefund:
 			if tx.Kind() != wagering.KindRollback {
 				return uc.rejectWithCode(ctx, repos, tx, w.Balance().AmountMinor(), apperr.CodeReferenceNotReversible, in.CorrelationID, now)
 			}
-			return proc.applyDebitWithRef(ctx, repos, tx, w, pwIn, &refID, now, apperr.CodeReversalInsufficientFunds, &result)
+			return applyDebitWithRef(ctx, repos, tx, w, pwIn, &refID, now, apperr.CodeReversalInsufficientFunds, &result)
 		default:
 			return uc.rejectWithCode(ctx, repos, tx, w.Balance().AmountMinor(), apperr.CodeReferenceNotReversible, in.CorrelationID, now)
 		}
