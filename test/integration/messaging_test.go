@@ -28,16 +28,19 @@ func TestInbox_SameMessageIDTwice(t *testing.T) {
 	uow := postgres.NewUnitOfWork(pool)
 	msgID := "msg-" + uuid.NewString()
 	err := uow.WithinTransaction(context.Background(), func(ctx context.Context, repos app.Repositories) error {
-		ok, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h1")
+		ok, _, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h1")
 		if err != nil || !ok {
 			return fmt.Errorf("first insert ok=%v err=%v", ok, err)
 		}
-		ok2, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h2")
+		ok2, existingHash, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h2")
 		if err != nil {
 			return err
 		}
 		if ok2 {
 			return fmt.Errorf("second insert should be conflict")
+		}
+		if existingHash != "h1" {
+			return fmt.Errorf("existing hash=%q want h1", existingHash)
 		}
 		return nil
 	})
