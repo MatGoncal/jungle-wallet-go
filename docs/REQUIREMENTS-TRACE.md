@@ -12,7 +12,7 @@ Fonte: [`CHALLENGE.md`](CHALLENGE.md). Cada exigência numerada aponta para arte
 | §2.2 | `providerId` pelo token; isolamento entre provedores | `auth.RequireProviderMatch`, handlers | `TestAuthz_NoFinancialEffect` |
 | §2.3 | Operações de carteira só serviço interno | roles `wallet:admin` nas rotas | `TestAuthz_NoFinancialEffect` |
 | §2.4 | Credenciais/políticas no broker + validação no consumidor | `deploy/localstack/init-sqs.sh`, consumer | `TestSQS_PoisonGoesTowardDLQ`, messaging |
-| §3.1 | At-least-once: HTTP e SQS repetidos | idempotência + inbox | `TestProcessWagerBetAndReplaySnapshot`, `TestInbox_SameMessageIDTwice`, cluster 50× |
+| §3.1 | At-least-once: HTTP e SQS repetidos | idempotência + inbox (hash em reentrega) | `TestProcessWagerBetAndReplaySnapshot`, `TestInbox_SameMessageIDTwice`, `TestInbox_SameMessageIDDifferentHash_NoFinancialEffect`, cluster 50× |
 | §3.2 | Reversão antes da referência | `PENDING_REFERENCE` + worker | `TestPendingReference_ResolvedAndExpired`, `TestCluster_RefundBeforeReference_ThenExpire` |
 | §3.3 | Simultâneo na mesma carteira | `FOR UPDATE` + version | `TestProcessWagerConcurrentInsufficientFunds`, `TestCluster_TwoBets80On100` |
 | §3.4 | Crash antes/depois do commit | outbox/inbox, Delete pós-commit | `TestCluster_KillBetweenCommitAndDelete_Replay`, `TestCluster_RestartPreservesConsistency` |
@@ -47,7 +47,7 @@ Fonte: [`CHALLENGE.md`](CHALLENGE.md). Cada exigência numerada aponta para arte
 | §7.2 | Resolução de referência e mismatches | `processReversal` | pending ref tests |
 | §7.3 | Uma reversão bem-sucedida por aposta (REFUND∪ROLLBACK) | índice parcial + código | `TestConstraints_OneReversalPerReference` |
 | §7.4 | `REVERSAL_INSUFFICIENT_FUNDS` ≠ `INSUFFICIENT_FUNDS` | `apperr` + process | domain/app |
-| §7.5 | PENDING_REFERENCE + worker TTL | `resolve_pending.go`, `worker/reference.go` | `TestPendingReference_*`, cluster refund |
+| §7.5 | PENDING_REFERENCE + worker TTL + claim/lease | `resolve_pending.go`, `worker/reference.go` (`ClaimPendingReferencesDue`) | `TestPendingReference_*`, `TestPendingReference_TwoClaimersCompete`, cluster refund |
 | §7.6 | failureCode estável | `apperr.Code*` + ARCHITECTURE | respostas 422 |
 | §8.1 | Coordenação por carteira, ≥3 processos | compose api-1..3 | `TestCluster_ThreeInstancesSimultaneously` |
 | §8.2 | 100 BRL + 2×80 BET → 20 + 1 débito | ProcessWager + cluster | `TestCluster_TwoBets80On100` |
@@ -58,7 +58,7 @@ Fonte: [`CHALLENGE.md`](CHALLENGE.md). Cada exigência numerada aponta para arte
 | §9.5 | Reconciliação REPEATABLE READ, difference, métrica | `queries` reconcile | `TestReconciliation_RepeatableReadConsistent` |
 | §9.6 | /health/live e /ready | `observability/health.go` | bootstrap / Fx |
 | §10.1 | Filas FIFO + DLQ redrive | `init-sqs.sh` | messaging poison |
-| §10.2 | Caso de uso compartilhado; Delete pós-commit | consumer | cluster kill + HTTP/SQS |
+| §10.2 | Caso de uso compartilhado; Delete pós-commit; hash inbox | consumer (`payload_hash` match / poison) | `TestInbox_SameMessageIDTwice`, `TestInbox_SameMessageIDDifferentHash_NoFinancialEffect`, cluster kill + HTTP/SQS |
 | §10.3 | Visibility 30s, maxReceiveCount 5, malformada→DLQ | init + consumer | `TestSQS_PoisonGoesTowardDLQ` |
 | §10.4 | SIGTERM: para poll, drena ou libera visibility | consumer lifecycle | Fx lifecycle |
 | §10.5 | MessageGroupId=walletId; Dedup=idempotency key | ARCHITECTURE + publish path | documentado + cluster |

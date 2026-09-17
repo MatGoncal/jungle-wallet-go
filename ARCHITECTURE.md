@@ -93,11 +93,11 @@ Estados: `PENDING` → `PENDING_REFERENCE` | `PROCESSED` | `REJECTED` | `FAILED`
 
 Política de reversão: **uma única reversão bem-sucedida por aposta**, seja `REFUND` ou `ROLLBACK` — índice único parcial em `reference_transaction_id WHERE status = 'PROCESSED'`. Segunda tentativa → `REFERENCE_ALREADY_REVERSED`. Mais restritivo que “duas do mesmo tipo”; evita devolução duplicada do mesmo débito.
 
-Worker de referência: backoff, `next_attempt_at`, máximo de tentativas e TTL (defaults no caso de uso). Esgotado → `REJECTED` + `REFERENCE_NOT_FOUND` + evento de rejeição.
+Worker de referência: claim com lease (`FOR UPDATE OF r SKIP LOCKED` em `reference_retry_state`, `next_attempt_at` empurrado até o fim do lease — mesmo padrão da outbox), depois resolve cada id. Após `GetForUpdate` na carteira, o status é relido; se já não for `PENDING_REFERENCE`, a instância sai sem crédito duplicado. Backoff, máximo de tentativas e TTL (defaults no caso de uso). Esgotado → `REJECTED` + `REFERENCE_NOT_FOUND` + evento de rejeição. Se o processo morrer no meio, a linha volta a ser elegível quando o lease vence (retomada durável §7.5).
 
 ## Inbox e outbox
 
-- **Inbox**: `UNIQUE (consumer_name, message_id)` na mesma tx do domínio. `DeleteMessage` só pós-commit. Malformada → caminho para DLQ sem reprocessar domínio.
+- **Inbox**: `UNIQUE (consumer_name, message_id)` na mesma tx do domínio; grava `payload_hash`. Em reentrega, compara o hash persistido com o do corpo atual — igual → replay idempotente (`MarkCompleted`); diferente → rollback da tx e caminho `poison` (visibility 0 → DLQ via `maxReceiveCount`). `DeleteMessage` só pós-commit. Malformada → caminho para DLQ sem reprocessar domínio.
 - **Outbox**: registros no mesmo commit; worker separado com `FOR UPDATE SKIP LOCKED` + `locked_until`, backoff e retomada. Republicação preserva `eventId` (= `MessageDeduplicationId` da fila de eventos).
 
 Eventos tipados: `WagerTransactionProcessed`, `WagerTransactionRejected`, `WalletBalanceChanged`, `WagerTransactionPendingReference`. Envelope com `eventId`, `eventType`, `aggregateId`, `correlationId`, `causationId` opcional, `occurredAt`, `version`, `data`.
