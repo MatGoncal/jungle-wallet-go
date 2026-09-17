@@ -42,7 +42,8 @@ type TransactionRepository interface {
 	GetByExternalID(ctx context.Context, providerID, externalID string) (wagering.WagerTransaction, bool, error)
 	TryInsertIdempotency(ctx context.Context, tx wagering.WagerTransaction) (inserted bool, existing wagering.WagerTransaction, err error)
 	GetProcessedReversalByReference(ctx context.Context, referenceID uuid.UUID) (wagering.WagerTransaction, bool, error)
-	ListPendingReferencesDue(ctx context.Context, now time.Time, limit int) ([]wagering.WagerTransaction, error)
+	// ClaimPendingReferencesDue locks due PENDING_REFERENCE rows (SKIP LOCKED) and pushes next_attempt_at to lockUntil.
+	ClaimPendingReferencesDue(ctx context.Context, now time.Time, lockUntil time.Time, limit int) ([]wagering.WagerTransaction, error)
 }
 
 type LedgerRepository interface {

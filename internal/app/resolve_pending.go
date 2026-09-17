@@ -54,6 +54,15 @@ func (uc *ResolvePendingReference) Execute(ctx context.Context, in ResolvePendin
 			return err
 		}
 
+		// Another worker may have finished while we waited on the wallet lock.
+		tx, err = repos.Transactions().GetByID(ctx, in.TransactionID)
+		if err != nil {
+			return err
+		}
+		if tx.Status() != wagering.StatusPendingReference {
+			return nil
+		}
+
 		ref, found, err := repos.Transactions().GetByExternalID(ctx, tx.ProviderID(), tx.ReferenceExternalTransactionID())
 		if err != nil {
 			return err

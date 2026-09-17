@@ -208,20 +208,31 @@ func (r *TransactionRepo) GetProcessedReversalByReference(ctx context.Context, r
 		  AND kind IN ('REFUND', 'ROLLBACK')`, referenceID)
 }
 
-func (r *TransactionRepo) ListPendingReferencesDue(ctx context.Context, now time.Time, limit int) ([]wagering.WagerTransaction, error) {
+func (r *TransactionRepo) ClaimPendingReferencesDue(ctx context.Context, now time.Time, lockUntil time.Time, limit int) ([]wagering.WagerTransaction, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	rows, err := r.q.Query(ctx, `
-		SELECT `+txColumnsPrefixed("t")+`
-		FROM wager_transactions t
-		INNER JOIN reference_retry_state r ON r.transaction_id = t.id
-		WHERE t.status = 'PENDING_REFERENCE'
-		  AND r.next_attempt_at <= $1
-		ORDER BY r.next_attempt_at ASC
-		LIMIT $2`, now, limit)
+		WITH cte AS (
+			SELECT r.transaction_id
+			FROM reference_retry_state r
+			INNER JOIN wager_transactions t ON t.id = r.transaction_id
+			WHERE t.status = 'PENDING_REFERENCE'
+			  AND r.next_attempt_at <= $1
+			ORDER BY r.next_attempt_at ASC
+			FOR UPDATE OF r SKIP LOCKED
+			LIMIT $2
+		)
+		UPDATE reference_retry_state r
+		SET next_attempt_at = $3
+		FROM cte
+		INNER JOIN wager_transactions t ON t.id = cte.transaction_id
+		WHERE r.transaction_id = cte.transaction_id
+		RETURNING `+txColumnsPrefixed("t"),
+		now, limit, lockUntil,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("list pending references: %w", err)
+		return nil, fmt.Errorf("claim pending references: %w", err)
 	}
 	defer rows.Close()
 

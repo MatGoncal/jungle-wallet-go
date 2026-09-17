@@ -142,18 +142,21 @@ func (m *memTxs) GetProcessedReversalByReference(_ context.Context, referenceID 
 	}
 	return m.u.txs[id], true, nil
 }
-func (m *memTxs) ListPendingReferencesDue(_ context.Context, now time.Time, limit int) ([]wagering.WagerTransaction, error) {
+func (m *memTxs) ClaimPendingReferencesDue(_ context.Context, now time.Time, lockUntil time.Time, limit int) ([]wagering.WagerTransaction, error) {
 	var out []wagering.WagerTransaction
 	for id, retry := range m.u.refRetry {
 		if retry.NextAttemptAt.After(now) {
 			continue
 		}
 		tx := m.u.txs[id]
-		if tx.Status() == wagering.StatusPendingReference {
-			out = append(out, tx)
-			if len(out) >= limit {
-				break
-			}
+		if tx.Status() != wagering.StatusPendingReference {
+			continue
+		}
+		retry.NextAttemptAt = lockUntil
+		m.u.refRetry[id] = retry
+		out = append(out, tx)
+		if limit > 0 && len(out) >= limit {
+			break
 		}
 	}
 	return out, nil
