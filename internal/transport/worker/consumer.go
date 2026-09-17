@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -24,6 +25,10 @@ import (
 )
 
 const consumerName = "wager-transactions-consumer"
+
+// errInboxPayloadMismatch is returned when the same messageId arrives with a different body hash.
+// The transaction rolls back; poison() then drives the message toward the DLQ.
+var errInboxPayloadMismatch = errors.New("inbox payload hash mismatch")
 
 // MessageGroupId = walletId; MessageDeduplicationId = idempotency key (documented).
 // VisibilityTimeout=30s, maxReceiveCount=5 before DLQ (provisioned in LocalStack init).
@@ -271,11 +276,14 @@ func (c *Consumer) handle(ctx context.Context, msg types.Message) error {
 	}
 
 	err = c.uow.WithinTransaction(ctx, func(ctx context.Context, repos app.Repositories) error {
-		inserted, err := repos.Inbox().Insert(ctx, consumerName, env.MessageID, hash)
+		inserted, existingHash, err := repos.Inbox().Insert(ctx, consumerName, env.MessageID, hash)
 		if err != nil {
 			return err
 		}
 		if !inserted {
+			if existingHash != hash {
+				return errInboxPayloadMismatch
+			}
 			if c.metrics != nil {
 				c.metrics.IdempotentReplays.Inc()
 			}
@@ -312,6 +320,9 @@ func (c *Consumer) handle(ctx context.Context, msg types.Message) error {
 		return repos.Inbox().MarkCompleted(ctx, consumerName, env.MessageID)
 	})
 	if err != nil {
+		if errors.Is(err, errInboxPayloadMismatch) {
+			return c.poison(ctx, msg, err)
+		}
 		return err
 	}
 

@@ -53,7 +53,8 @@ type LedgerRepository interface {
 }
 
 type InboxRepository interface {
-	Insert(ctx context.Context, consumerName, messageID, payloadHash string) (inserted bool, err error)
+	// Insert records the message. On conflict returns inserted=false and the payload hash already stored.
+	Insert(ctx context.Context, consumerName, messageID, payloadHash string) (inserted bool, existingHash string, err error)
 	MarkCompleted(ctx context.Context, consumerName, messageID string) error
 }
 

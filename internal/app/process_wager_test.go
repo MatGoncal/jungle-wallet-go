@@ -196,13 +196,13 @@ func (m *memLedger) SumByWallet(_ context.Context, walletID uuid.UUID) (netMinor
 
 type memInbox struct{ u *memUoW }
 
-func (m *memInbox) Insert(_ context.Context, consumerName, messageID, payloadHash string) (bool, error) {
+func (m *memInbox) Insert(_ context.Context, consumerName, messageID, payloadHash string) (bool, string, error) {
 	k := consumerName + "|" + messageID
-	if _, ok := m.u.inbox[k]; ok {
-		return false, nil
+	if existing, ok := m.u.inbox[k]; ok {
+		return false, existing, nil
 	}
 	m.u.inbox[k] = payloadHash
-	return true, nil
+	return true, "", nil
 }
 func (m *memInbox) MarkCompleted(context.Context, string, string) error { return nil }
 
