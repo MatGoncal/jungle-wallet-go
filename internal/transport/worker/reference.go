@@ -10,6 +10,8 @@ import (
 	"github.com/matheusgoncalves/jungle-wallet-go/internal/infra/observability"
 )
 
+const referenceLockTTL = 30 * time.Second
+
 // ReferenceWorker polls PENDING_REFERENCE rows due for retry (backoff + TTL).
 type ReferenceWorker struct {
 	uow     app.UnitOfWork
@@ -67,9 +69,10 @@ func (w *ReferenceWorker) loop(ctx context.Context) {
 
 func (w *ReferenceWorker) tick(ctx context.Context) error {
 	now := time.Now().UTC()
+	lockUntil := now.Add(referenceLockTTL)
 	var ids []uuid.UUID
 	err := w.uow.WithinTransaction(ctx, func(ctx context.Context, repos app.Repositories) error {
-		txs, err := repos.Transactions().ListPendingReferencesDue(ctx, now, 20)
+		txs, err := repos.Transactions().ClaimPendingReferencesDue(ctx, now, lockUntil, 20)
 		if err != nil {
 			return err
 		}
