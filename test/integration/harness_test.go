@@ -84,7 +84,14 @@ func TestMain(m *testing.M) {
 		postgres.WithUsername("wallet"),
 		postgres.WithPassword("wallet"),
 		network.WithNetwork([]string{"pg"}, netw),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("5432/tcp").WithStartupTimeout(60*time.Second)),
+		// The entrypoint starts Postgres, runs init, then restarts it: the port listens
+		// before the real server is up, so migrations hit a reset connection. The second
+		// occurrence of the ready log is the restarted server.
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second),
+		),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "postgres container: %v — falling back to compose\n", err)
