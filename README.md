@@ -2,7 +2,13 @@
 
 Serviço de carteira e apostas em Go (desafio Jungle Gaming): API HTTP + consumidor SQS FIFO, com PostgreSQL, Keycloak (OIDC) e LocalStack.
 
-Requisitos: [`docs/CHALLENGE.md`](docs/CHALLENGE.md). Decisões: [`ARCHITECTURE.md`](ARCHITECTURE.md). Rastreio: [`docs/REQUIREMENTS-TRACE.md`](docs/REQUIREMENTS-TRACE.md). Agentes: [`AGENTS.md`](AGENTS.md). Exemplos: [`docs/examples/curl.md`](docs/examples/curl.md). Collection Postman: [`docs/examples/jungle-wallet.postman_collection.json`](docs/examples/jungle-wallet.postman_collection.json). Diagramas: [`docs/diagrams/`](docs/diagrams/).
+Requisitos: [`docs/CHALLENGE.md`](docs/CHALLENGE.md). 
+Decisões: [`ARCHITECTURE.md`](ARCHITECTURE.md). 
+Rastreio: [`docs/REQUIREMENTS-TRACE.md`](docs/REQUIREMENTS-TRACE.md). 
+Agentes: [`AGENTS.md`](AGENTS.md). 
+Exemplos: [`docs/examples/curl.md`](docs/examples/curl.md). 
+Collection Postman: [`docs/examples/jungle-wallet.postman_collection.json`](docs/examples/jungle-wallet.postman_collection.json). 
+Diagramas: [`docs/diagrams/`](docs/diagrams/).
 
 ## Pré-requisitos
 
