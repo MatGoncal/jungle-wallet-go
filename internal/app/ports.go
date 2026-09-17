@@ -42,7 +42,8 @@ type TransactionRepository interface {
 	GetByExternalID(ctx context.Context, providerID, externalID string) (wagering.WagerTransaction, bool, error)
 	TryInsertIdempotency(ctx context.Context, tx wagering.WagerTransaction) (inserted bool, existing wagering.WagerTransaction, err error)
 	GetProcessedReversalByReference(ctx context.Context, referenceID uuid.UUID) (wagering.WagerTransaction, bool, error)
-	ListPendingReferencesDue(ctx context.Context, now time.Time, limit int) ([]wagering.WagerTransaction, error)
+	// ClaimPendingReferencesDue locks due PENDING_REFERENCE rows (SKIP LOCKED) and pushes next_attempt_at to lockUntil.
+	ClaimPendingReferencesDue(ctx context.Context, now time.Time, lockUntil time.Time, limit int) ([]wagering.WagerTransaction, error)
 }
 
 type LedgerRepository interface {
@@ -53,7 +54,8 @@ type LedgerRepository interface {
 }
 
 type InboxRepository interface {
-	Insert(ctx context.Context, consumerName, messageID, payloadHash string) (inserted bool, err error)
+	// Insert records the message. On conflict returns inserted=false and the payload hash already stored.
+	Insert(ctx context.Context, consumerName, messageID, payloadHash string) (inserted bool, existingHash string, err error)
 	MarkCompleted(ctx context.Context, consumerName, messageID string) error
 }
 

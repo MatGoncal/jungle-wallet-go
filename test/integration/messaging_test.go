@@ -28,21 +28,188 @@ func TestInbox_SameMessageIDTwice(t *testing.T) {
 	uow := postgres.NewUnitOfWork(pool)
 	msgID := "msg-" + uuid.NewString()
 	err := uow.WithinTransaction(context.Background(), func(ctx context.Context, repos app.Repositories) error {
-		ok, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h1")
+		ok, _, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h1")
 		if err != nil || !ok {
 			return fmt.Errorf("first insert ok=%v err=%v", ok, err)
 		}
-		ok2, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h2")
+		ok2, existingHash, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, "h2")
 		if err != nil {
 			return err
 		}
 		if ok2 {
 			return fmt.Errorf("second insert should be conflict")
 		}
+		if existingHash != "h1" {
+			return fmt.Errorf("existing hash=%q want h1", existingHash)
+		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestInbox_SameMessageIDDifferentHash_NoFinancialEffect mirrors the consumer path:
+// first delivery inserts inbox + processes a BET; a redelivery with the same messageId
+// and a different payload hash must abort without a second debit.
+func TestInbox_SameMessageIDDifferentHash_NoFinancialEffect(t *testing.T) {
+	pool := openPool(t)
+	uow := postgres.NewUnitOfWork(pool)
+	open := app.NewOpenWallet(uow)
+	process := app.NewProcessWagerTransaction(uow)
+	player := mustV7(t)
+	bal, _ := money.Parse("100.00", "BRL")
+	wal, err := open.Execute(context.Background(), app.OpenWalletInput{
+		PlayerID: player, InitialBalance: bal, CorrelationID: "inbox-hash-open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	suffix := uuid.NewString()
+	msgID := "msg-hash-" + suffix
+	hashA := "hash-body-a-" + suffix
+	bet, _ := money.Parse("10.00", "BRL")
+	in := app.ProcessWagerInput{
+		ProviderID: "provider-a", ExternalTransactionID: "ext-inbox-hash-" + suffix, IdempotencyKey: "idem-inbox-hash-" + suffix,
+		PlayerID: player, WalletID: wal.Wallet.ID(), RoundID: "r-inbox-hash-" + suffix, GameID: "g1",
+		Kind: wagering.KindBet, Money: bet, CorrelationID: msgID,
+	}
+
+	err = uow.WithinTransaction(context.Background(), func(ctx context.Context, repos app.Repositories) error {
+		ok, _, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, hashA)
+		if err != nil || !ok {
+			return fmt.Errorf("first inbox insert ok=%v err=%v", ok, err)
+		}
+		if _, err := process.ExecuteWithRepos(ctx, repos, in); err != nil {
+			return err
+		}
+		return repos.Inbox().MarkCompleted(ctx, "wager-transactions-consumer", msgID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var balanceAfterFirst, debitsAfterFirst int64
+	_ = pool.QueryRow(context.Background(), `SELECT balance_minor FROM wallets WHERE id=$1`, wal.Wallet.ID()).Scan(&balanceAfterFirst)
+	_ = pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM wallet_ledger_entries WHERE wallet_id=$1 AND direction='DEBIT'`, wal.Wallet.ID()).Scan(&debitsAfterFirst)
+	if balanceAfterFirst != 9000 || debitsAfterFirst != 1 {
+		t.Fatalf("after first delivery balance=%d debits=%d", balanceAfterFirst, debitsAfterFirst)
+	}
+
+	hashB := "hash-body-b-" + uuid.NewString()
+	err = uow.WithinTransaction(context.Background(), func(ctx context.Context, repos app.Repositories) error {
+		ok, existingHash, err := repos.Inbox().Insert(ctx, "wager-transactions-consumer", msgID, hashB)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return fmt.Errorf("expected inbox conflict on same messageId")
+		}
+		if existingHash != hashA {
+			return fmt.Errorf("existing hash=%q want %q", existingHash, hashA)
+		}
+		if existingHash == hashB {
+			return fmt.Errorf("hashes should differ")
+		}
+		// Divergent body must not reach ExecuteWithRepos (would debit again).
+		return fmt.Errorf("inbox payload hash mismatch")
+	})
+	if err == nil || err.Error() != "inbox payload hash mismatch" {
+		t.Fatalf("expected hash mismatch abort, got %v", err)
+	}
+
+	var balanceAfterMismatch, debitsAfterMismatch int64
+	_ = pool.QueryRow(context.Background(), `SELECT balance_minor FROM wallets WHERE id=$1`, wal.Wallet.ID()).Scan(&balanceAfterMismatch)
+	_ = pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM wallet_ledger_entries WHERE wallet_id=$1 AND direction='DEBIT'`, wal.Wallet.ID()).Scan(&debitsAfterMismatch)
+	if balanceAfterMismatch != balanceAfterFirst || debitsAfterMismatch != debitsAfterFirst {
+		t.Fatalf("mismatch must not change money: balance %d→%d debits %d→%d",
+			balanceAfterFirst, balanceAfterMismatch, debitsAfterFirst, debitsAfterMismatch)
+	}
+}
+
+func TestPendingReference_TwoClaimersCompete(t *testing.T) {
+	pool := openPool(t)
+	uow := postgres.NewUnitOfWork(pool)
+	open := app.NewOpenWallet(uow)
+	process := app.NewProcessWagerTransaction(uow)
+	player := mustV7(t)
+	bal, _ := money.Parse("100.00", "BRL")
+	wal, err := open.Execute(context.Background(), app.OpenWalletInput{
+		PlayerID: player, InitialBalance: bal, CorrelationID: "ref-claim-open",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refundAmt, _ := money.Parse("5.00", "BRL")
+	var pendingIDs []uuid.UUID
+	for i := 0; i < 3; i++ {
+		pending, err := process.Execute(context.Background(), app.ProcessWagerInput{
+			ProviderID: "provider-a", ExternalTransactionID: fmt.Sprintf("ref-claim-%d-%s", i, uuid.NewString()),
+			IdempotencyKey: fmt.Sprintf("k-ref-claim-%d-%s", i, uuid.NewString()),
+			PlayerID:       player, WalletID: wal.Wallet.ID(), RoundID: fmt.Sprintf("r-claim-%d", i), GameID: "g1",
+			Kind: wagering.KindRefund, Money: refundAmt, ReferenceExternalTransactionID: fmt.Sprintf("bet-missing-%d", i),
+			CorrelationID: "ref-claim", ReferenceTTL: time.Hour, ReferenceMaxAttempts: 12,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pending.Transaction.Status() != wagering.StatusPendingReference {
+			t.Fatalf("status=%s", pending.Transaction.Status())
+		}
+		pendingIDs = append(pendingIDs, pending.Transaction.ID())
+	}
+	for _, id := range pendingIDs {
+		_, err = pool.Exec(context.Background(), `
+			UPDATE reference_retry_state SET next_attempt_at = NOW() - interval '1 second'
+			WHERE transaction_id = $1`, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now().UTC()
+	lockUntil := now.Add(30 * time.Second)
+	var a, b []wagering.WagerTransaction
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_ = uow.WithinTransaction(context.Background(), func(ctx context.Context, repos app.Repositories) error {
+			var err error
+			a, err = repos.Transactions().ClaimPendingReferencesDue(ctx, now, lockUntil, 10)
+			return err
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = uow.WithinTransaction(context.Background(), func(ctx context.Context, repos app.Repositories) error {
+			var err error
+			b, err = repos.Transactions().ClaimPendingReferencesDue(ctx, now, lockUntil, 10)
+			return err
+		})
+	}()
+	wg.Wait()
+
+	want := map[uuid.UUID]bool{}
+	for _, id := range pendingIDs {
+		want[id] = true
+	}
+	seen := map[uuid.UUID]bool{}
+	for _, tx := range append(a, b...) {
+		if !want[tx.ID()] {
+			continue // other due rows may exist in a shared Compose DB
+		}
+		if seen[tx.ID()] {
+			t.Fatalf("duplicate claim of pending reference %s", tx.ID())
+		}
+		seen[tx.ID()] = true
+	}
+	if len(seen) != len(pendingIDs) {
+		t.Fatalf("expected exclusive claim of %d pending refs, got %d (a=%d b=%d)", len(pendingIDs), len(seen), len(a), len(b))
 	}
 }
 

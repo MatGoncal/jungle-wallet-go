@@ -21,7 +21,7 @@ func NewInboxRepo(q querier) *InboxRepo {
 	return &InboxRepo{q: q}
 }
 
-func (r *InboxRepo) Insert(ctx context.Context, consumerName, messageID, payloadHash string) (bool, error) {
+func (r *InboxRepo) Insert(ctx context.Context, consumerName, messageID, payloadHash string) (bool, string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
 		id = uuid.New()
@@ -33,9 +33,21 @@ func (r *InboxRepo) Insert(ctx context.Context, consumerName, messageID, payload
 		id, consumerName, messageID, payloadHash, time.Now().UTC(),
 	)
 	if err != nil {
-		return false, fmt.Errorf("insert inbox: %w", err)
+		return false, "", fmt.Errorf("insert inbox: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	if tag.RowsAffected() == 1 {
+		return true, "", nil
+	}
+	var existingHash string
+	err = r.q.QueryRow(ctx, `
+		SELECT payload_hash FROM inbox_messages
+		WHERE consumer_name = $1 AND message_id = $2`,
+		consumerName, messageID,
+	).Scan(&existingHash)
+	if err != nil {
+		return false, "", fmt.Errorf("select inbox payload hash: %w", err)
+	}
+	return false, existingHash, nil
 }
 
 func (r *InboxRepo) MarkCompleted(ctx context.Context, consumerName, messageID string) error {
